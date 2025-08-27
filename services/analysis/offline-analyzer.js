@@ -153,6 +153,10 @@ class OfflineAnalyzer {
       return 'vendas';
     } else if (messageLower.includes('bonus') || messageLower.includes('bônus')) {
       return 'bonus';
+    } else if (messageLower.includes('cassino') || messageLower.includes('jogo') || messageLower.includes('aposta') || messageLower.includes('loteria')) {
+      return 'jogos';
+    } else if (messageLower.includes('investimento') || messageLower.includes('rendimento') || messageLower.includes('dividendo')) {
+      return 'investimento';
     } else {
       return 'outros';
     }

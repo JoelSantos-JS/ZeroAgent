@@ -2,6 +2,7 @@ const whatsappService = require('./whatsapp-service');
 const databaseService = require('../config/database');
 const userService = require('./user-service');
 const geminiService = require('./gemini-service');
+const AudioProcessor = require('./audio-processor');
 const logger = require('../utils/logger');
 const moment = require('moment');
 
@@ -11,6 +12,7 @@ class FinancialAgent {
     this.processingQueue = new Map(); // Para evitar processamento duplicado
     this.conversationHistory = new Map(); // phoneNumber -> array of last messages
     this.maxHistorySize = 5; // Manter últimas 5 mensagens por usuário
+    this.audioProcessor = new AudioProcessor(); // Processador de áudio
   }
 
   // Inicializar o agente financeiro
@@ -21,6 +23,7 @@ class FinancialAgent {
       // Inicializar serviços
       await databaseService.initialize();
       await geminiService.initialize();
+      await this.audioProcessor.initialize();
       
       // Configurar processador de mensagens no WhatsApp Service
       whatsappService.setMessageProcessor(this);
@@ -49,6 +52,13 @@ class FinancialAgent {
     this.processingQueue.set(messageId, true);
     
     try {
+      // Verificar se é mensagem de áudio
+      if (message.hasAudio && message.audioBuffer) {
+        console.log('🎙️ Processando mensagem de áudio...');
+        return await this.processAudioMessage(message);
+      }
+      
+      // Processar mensagem de texto normal
       console.log(`🔄 Processando mensagem: ${message.body}`);
       
       // Adicionar mensagem do usuário ao histórico
@@ -149,6 +159,114 @@ class FinancialAgent {
         this.processingQueue.delete(messageId);
       }, 5000); // Manter por 5 segundos para evitar duplicatas
     }
+  }
+
+  // Processar mensagem de áudio
+  async processAudioMessage(message) {
+    try {
+      console.log('🎵 Iniciando processamento de áudio...');
+      
+      // Verificar autenticação
+      const authStatus = await this.checkUserAuthentication(message.from);
+      
+      if (!authStatus.isAuthenticated) {
+        return '🔐 Por favor, faça login primeiro antes de enviar áudios. Digite seu email para começar.';
+      }
+      
+      const user = authStatus.user;
+      
+      // Obter contexto do usuário para melhor análise
+      const userContext = await this.getUserContext(user.id);
+      
+      // Processar áudio com AudioProcessor
+      const audioResult = await this.audioProcessor.processAudio(message.audioBuffer, {
+        userId: user.id,
+        phoneNumber: message.from,
+        userContext: userContext
+      });
+      
+      if (!audioResult.success) {
+        console.error('❌ Falha no processamento de áudio:', audioResult.error);
+        return audioResult.fallback || '❌ Não consegui processar o áudio. Tente novamente ou digite sua transação.';
+      }
+      
+      console.log('✅ Áudio processado:', {
+        transcription: audioResult.transcription?.substring(0, 50) + '...',
+        type: audioResult.financialData?.tipo,
+        value: audioResult.financialData?.valor
+      });
+      
+      // Adicionar transcrição ao histórico
+      this.addToConversationHistory(message.from, audioResult.transcription, 'user');
+      
+      // Processar dados financeiros extraídos
+      const analysisResult = {
+        tipo: audioResult.financialData.tipo,
+        valor: audioResult.financialData.valor,
+        categoria: audioResult.financialData.categoria,
+        descricao: audioResult.financialData.descricao,
+        data: audioResult.financialData.data,
+        intencao: this.mapTypeToIntention(audioResult.financialData.tipo),
+        confianca: audioResult.financialData.confianca,
+        analise: `Análise de áudio (${audioResult.optimization.tokenSavings} tokens economizados)`,
+        dica: this.generateAudioTip(audioResult)
+      };
+      
+      // Processar baseado no tipo de transação
+      let response;
+      
+      if (analysisResult.tipo === 'receita') {
+        response = await this.processIncomeTransaction(user.id, analysisResult);
+      } else if (analysisResult.tipo === 'despesa' || analysisResult.tipo === 'despesa_fixa' || analysisResult.tipo === 'despesa_variavel') {
+        response = await this.processExpenseTransaction(user.id, analysisResult);
+      } else if (analysisResult.tipo === 'investimento') {
+        response = await this.processInvestmentTransaction(user.id, analysisResult);
+      } else if (analysisResult.tipo === 'consulta') {
+        response = await this.processQuery(user.id, analysisResult);
+      } else {
+        response = await this.processOtherMessage(user.id, analysisResult);
+      }
+      
+      // Adicionar informações sobre a otimização do áudio
+      const optimizationInfo = `\n\n📊 *Processamento otimizado:* ${audioResult.optimization.tokenSavingsPercent} economia de tokens`;
+      
+      return response + optimizationInfo;
+      
+    } catch (error) {
+      console.error('❌ Erro no processamento de áudio:', error);
+      logger.error('Erro no processamento de áudio', {
+        from: message.from,
+        error: error.message
+      });
+      
+      return '❌ Erro ao processar áudio. Por favor, tente novamente ou digite sua transação.';
+    }
+  }
+  
+  // Mapear tipo para intenção
+  mapTypeToIntention(tipo) {
+    const mapping = {
+      'receita': 'registrar_receita',
+      'despesa': 'registrar_despesa',
+      'despesa_fixa': 'registrar_despesa',
+      'despesa_variavel': 'registrar_despesa',
+      'investimento': 'registrar_investimento',
+      'consulta': 'consultar_gastos',
+      'outros': 'registrar'
+    };
+    
+    return mapping[tipo] || 'registrar';
+  }
+  
+  // Gerar dica específica para áudio
+  generateAudioTip(audioResult) {
+    const tips = [
+      '🎙️ Áudio processado com sucesso! Continue usando áudios para registros mais rápidos.',
+      '⚡ Processamento otimizado economizou tokens. Fale de forma clara para melhores resultados.',
+      '🔊 Dica: Fale pausadamente e mencione o valor e categoria para análises mais precisas.'
+    ];
+    
+    return tips[Math.floor(Math.random() * tips.length)];
   }
 
   // Adicionar mensagem ao histórico de conversa
@@ -385,7 +503,7 @@ class FinancialAgent {
         monthlySpent: stats.monthlySpent,
         recentTransactions: recentTransactions.map(t => ({
           value: t.amount,
-          category: t.category,
+          categoria: t.category, // Corrigido: usar 'categoria' em vez de 'category'
           description: t.description,
           date: t.date
         })),
@@ -516,6 +634,7 @@ class FinancialAgent {
         'vendas': 'Venda realizada com sucesso! 💰',
         'bonus': 'Bônus recebido! 🎉',
         'investimento': 'Retorno de investimento! 📈',
+        'jogos': 'Ganho em jogos registrado! 🎰',
         'outros': 'Receita registrada com sucesso! ✅'
       };
       
@@ -530,7 +649,8 @@ class FinancialAgent {
         'freelance': 'Considere guardar 20% para impostos! 📊',
         'vendas': 'Ótimo! Continue focando nas vendas! 🚀',
         'bonus': 'Uma boa oportunidade para investir ou quitar dívidas! 💪',
-        'investimento': 'Seus investimentos estão dando retorno! Continue assim! 📈'
+        'investimento': 'Seus investimentos estão dando retorno! Continue assim! 📈',
+        'jogos': 'Lembre-se: jogos devem ser diversão, não investimento! Jogue com responsabilidade! ⚠️'
       };
       
       const dicaFinal = dica || dicasPersonalizadas[categoria] || 'Continue registrando suas receitas para ter controle total das finanças! 📈';

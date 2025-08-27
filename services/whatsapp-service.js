@@ -302,6 +302,20 @@ class WhatsAppService {
       return;
     }
     
+    // Verificar se é mensagem de áudio
+    if (message.hasMedia && message.type === 'audio') {
+      console.log(`🎙️ Áudio recebido de ${message.from}`);
+      logger.info('Áudio recebido', {
+        from: message.from,
+        type: message.type,
+        timestamp: message.timestamp
+      });
+      
+      // Processar áudio
+      await this.handleAudioMessage(message);
+      return;
+    }
+    
     console.log(`📨 Mensagem recebida de ${message.from}: ${message.body}`);
     logger.info('Mensagem recebida', {
       from: message.from,
@@ -323,6 +337,79 @@ class WhatsAppService {
     } else {
       // Resposta padrão se não há processador configurado
       await this.sendMessage(message.from, '🤖 Olá! Sou seu assistente financeiro. Envie uma mensagem como "Gastei 50 reais no supermercado" para registrar uma transação.');
+    }
+  }
+
+  // Processar mensagem de áudio
+  async handleAudioMessage(message) {
+    try {
+      console.log('🔄 Processando áudio...');
+      
+      // Enviar mensagem de confirmação
+      await this.sendMessage(message.from, '🎙️ Áudio recebido! Processando sua transação...');
+      
+      // Baixar áudio
+      const media = await message.downloadMedia();
+      
+      if (!media) {
+        throw new Error('Falha ao baixar áudio');
+      }
+      
+      // Validar tamanho do arquivo
+      const maxSize = 40 * 1024 * 1024; // 40MB
+      if (media.data && Buffer.from(media.data, 'base64').length > maxSize) {
+        await this.sendMessage(message.from, '❌ Áudio muito grande. Por favor, envie um áudio menor que 40MB.');
+        return;
+      }
+      
+      // Converter base64 para buffer
+      const audioBuffer = Buffer.from(media.data, 'base64');
+      
+      console.log('📁 Áudio baixado:', {
+        size: `${(audioBuffer.length / 1024).toFixed(2)}KB`,
+        mimetype: media.mimetype
+      });
+      
+      // Criar mensagem simulada para processamento
+      const audioMessage = {
+        ...message,
+        hasAudio: true,
+        audioBuffer: audioBuffer,
+        audioMimetype: media.mimetype,
+        body: '[ÁUDIO]' // Placeholder para identificação
+      };
+      
+      // Processar com o processador de mensagens
+      if (this.messageProcessor) {
+        const response = await this.messageProcessor.processMessage(audioMessage);
+        if (response) {
+          await this.sendMessage(message.from, response);
+        }
+      } else {
+        await this.sendMessage(message.from, '❌ Processador de áudio não configurado.');
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro ao processar áudio:', error);
+      logger.error('Erro no processamento de áudio', {
+        from: message.from,
+        error: error.message
+      });
+      
+      // Mensagens de erro específicas
+      let errorMessage = '❌ Erro ao processar áudio. ';
+      
+      if (error.message.includes('Falha ao baixar')) {
+        errorMessage += 'Não consegui baixar o áudio. Tente enviar novamente.';
+      } else if (error.message.includes('muito grande')) {
+        errorMessage += 'Áudio muito grande. Envie um áudio menor que 40MB.';
+      } else if (error.message.includes('formato')) {
+        errorMessage += 'Formato de áudio não suportado. Use MP3, WAV ou OGG.';
+      } else {
+        errorMessage += 'Tente novamente ou digite sua transação.';
+      }
+      
+      await this.sendMessage(message.from, errorMessage);
     }
   }
 

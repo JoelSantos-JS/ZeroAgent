@@ -311,6 +311,10 @@ class GeminiService {
          analysis.categoria = 'vendas';
        } else if (messageLower.includes('bonus') || messageLower.includes('bônus')) {
          analysis.categoria = 'bonus';
+       } else if (messageLower.includes('cassino') || messageLower.includes('jogo') || messageLower.includes('aposta') || messageLower.includes('loteria')) {
+         analysis.categoria = 'jogos';
+       } else if (messageLower.includes('investimento') || messageLower.includes('rendimento') || messageLower.includes('dividendo')) {
+         analysis.categoria = 'investimento';
        } else {
          analysis.categoria = 'outros';
        }
