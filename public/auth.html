@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔐 Autenticação - Financial Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .auth-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+        
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.8rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9rem;
+        }
+        
+        .auth-section {
+            margin-bottom: 30px;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .btn-google {
+            background: #4285f4;
+            color: white;
+        }
+        
+        .btn-google:hover {
+            background: #3367d6;
+            transform: translateY(-2px);
+        }
+        
+        .btn-email {
+            background: #34a853;
+            color: white;
+        }
+        
+        .btn-email:hover {
+            background: #2d8f47;
+            transform: translateY(-2px);
+        }
+        
+        .divider {
+            margin: 20px 0;
+            position: relative;
+            text-align: center;
+            color: #999;
+        }
+        
+        .divider::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: #ddd;
+        }
+        
+        .divider span {
+            background: white;
+            padding: 0 15px;
+        }
+        
+        .email-form {
+            display: none;
+            text-align: left;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #4285f4;
+        }
+        
+        .user-info {
+            display: none;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            background: #4285f4;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        
+        .whatsapp-section {
+            display: none;
+            background: #e8f5e8;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .whatsapp-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .whatsapp-input input {
+            flex: 1;
+        }
+        
+        .btn-whatsapp {
+            background: #25d366;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .btn-whatsapp:hover {
+            background: #20ba5a;
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .loading {
+            display: none;
+            margin: 20px 0;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4285f4;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .features {
+            margin-top: 30px;
+            text-align: left;
+        }
+        
+        .feature {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .feature-icon {
+            color: #4285f4;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="logo">🤖💰</div>
+        <h1>Financial Agent</h1>
+        <p class="subtitle">Seu assistente financeiro inteligente via WhatsApp</p>
+        
+        <!-- Seção de Login -->
+        <div id="loginSection" class="auth-section">
+            <button id="googleSignIn" class="btn btn-google">
+                <span>🔐</span>
+                Entrar com Google
+            </button>
+            
+            <div class="divider">
+                <span>ou</span>
+            </div>
+            
+            <button id="emailToggle" class="btn btn-email">
+                <span>📧</span>
+                Entrar com Email
+            </button>
+            
+            <div id="emailForm" class="email-form">
+                <div class="form-group">
+                    <label for="email">Email:</label>
+                    <input type="email" id="email" placeholder="seu@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Senha:</label>
+                    <input type="password" id="password" placeholder="Sua senha" required>
+                </div>
+                <button id="emailSignIn" class="btn btn-email">Entrar</button>
+                <button id="emailSignUp" class="btn" style="background: #6c757d; color: white;">Criar Conta</button>
+            </div>
+        </div>
+        
+        <!-- Informações do Usuário -->
+        <div id="userInfo" class="user-info">
+            <div id="userAvatar" class="user-avatar"></div>
+            <div id="userName" style="font-weight: 600; margin-bottom: 5px;"></div>
+            <div id="userEmail" style="color: #666; font-size: 0.9rem;"></div>
+        </div>
+        
+        <!-- Seção WhatsApp -->
+        <div id="whatsappSection" class="whatsapp-section">
+            <h3 style="margin-bottom: 10px; color: #25d366;">📱 Vincular WhatsApp</h3>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">
+                Para usar o agente financeiro, vincule seu número do WhatsApp:
+            </p>
+            <div class="whatsapp-input">
+                <input type="tel" id="whatsappNumber" placeholder="(11) 99999-9999" maxlength="15">
+                <button id="linkWhatsApp" class="btn-whatsapp">Vincular</button>
+            </div>
+        </div>
+        
+        <!-- Loading -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 10px; color: #666;">Processando...</p>
+        </div>
+        
+        <!-- Status -->
+        <div id="status"></div>
+        
+        <!-- Recursos -->
+        <div class="features">
+            <div class="feature">
+                <span class="feature-icon">💬</span>
+                <span>Registre gastos via WhatsApp</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📊</span>
+                <span>Análises financeiras inteligentes</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🔒</span>
+                <span>Dados seguros e privados</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🤖</span>
+                <span>IA especializada em finanças</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        
+        // Elementos DOM
+        const loginSection = document.getElementById('loginSection');
+        const userInfo = document.getElementById('userInfo');
+        const whatsappSection = document.getElementById('whatsappSection');
+        const loading = document.getElementById('loading');
+        const status = document.getElementById('status');
+        const emailForm = document.getElementById('emailForm');
+        
+        let firebaseConfig = null;
+        let auth = null;
+        let currentUser = null;
+        
+        // Inicializar Firebase
+        async function initFirebase() {
+            try {
+                const response = await fetch('/api/auth/config');
+                const data = await response.json();
+                firebaseConfig = data.config;
+                
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                
+                // Verificar se usuário já está logado
+                auth.onAuthStateChanged(handleAuthStateChange);
+                
+            } catch (error) {
+                showStatus('Erro ao inicializar Firebase: ' + error.message, 'error');
+            }
+        }
+        
+        // Gerenciar mudanças de autenticação
+        async function handleAuthStateChange(user) {
+            if (user) {
+                currentUser = user;
+                await authenticateWithBackend(user);
+            } else {
+                currentUser = null;
+                showLoginSection();
+            }
+        }
+        
+        // Autenticar com backend
+        async function authenticateWithBackend(user) {
+            try {
+                showLoading(true);
+                
+                const idToken = await user.getIdToken();
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ idToken })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showUserInfo(data.user);
+                    await checkWhatsAppStatus();
+                } else {
+                    showStatus('Erro na autenticação: ' + data.error, 'error');
+                }
+                
+            } catch (error) {
+                showStatus('Erro ao autenticar: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // Verificar status do WhatsApp
+        async function checkWhatsAppStatus() {
+            try {
+                const idToken = await currentUser.getIdToken();
+                const response = await fetch('/api/auth/whatsapp-status', {
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.hasWhatsApp) {
+                    showStatus(`WhatsApp vinculado: ${data.whatsappNumber}`, 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 2000);
+                } else {
+                    whatsappSection.style.display = 'block';
+                }
+                
+            } catch (error) {
+                console.error('Erro ao verificar WhatsApp:', error);
+                whatsappSection.style.display = 'block';
+            }
+        }
+        
+        // Mostrar seção de login
+        function showLoginSection() {
+            loginSection.style.display = 'block';
+            userInfo.style.display = 'none';
+            whatsappSection.style.display = 'none';
+        }
+        
+        // Mostrar informações do usuário
+        function showUserInfo(user) {
+            loginSection.style.display = 'none';
+            userInfo.style.display = 'block';
+            
+            document.getElementById('userAvatar').textContent = user.name.charAt(0).toUpperCase();
+            document.getElementById('userName').textContent = user.name;
+            document.getElementById('userEmail').textContent = user.email;
+        }
+        
+        // Mostrar/ocultar loading
+        function showLoading(show) {
+            loading.style.display = show ? 'block' : 'none';
+        }
+        
+        // Mostrar status
+        function showStatus(message, type = 'info') {
+            status.innerHTML = `<div class="status ${type}">${message}</div>`;
+            setTimeout(() => {
+                status.innerHTML = '';
+            }, 5000);
+        }
+        
+        // Event Listeners
+        document.getElementById('googleSignIn').addEventListener('click', async () => {
+            try {
+                showLoading(true);
+                const provider = new GoogleAuthProvider();
+                await signInWithPopup(auth, provider);
+            } catch (error) {
+                showStatus('Erro no login com Google: ' + error.message, 'error');
+                showLoading(false);
+            }
+        });
+        
+        document.getElementById('emailToggle').addEventListener('click', () => {
+            emailForm.style.display = emailForm.style.display === 'none' ? 'block' : 'none';
+        });
+        
+        document.getElementById('emailSignIn').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            if (!email || !password) {
+                showStatus('Preencha email e senha', 'error');
+                return;
+            }
+            
+            try {
+                showLoading(true);
+                await signInWithEmailAndPassword(auth, email, password);
+            } catch (error) {
+                showStatus('Erro no login: ' + error.message, 'error');
+                showLoading(false);
+            }
+        });
+        
+        document.getElementById('emailSignUp').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            if (!email || !password) {
+                showStatus('Preencha email e senha', 'error');
+                return;
+            }
+            
+            if (password.length < 6) {
+                showStatus('Senha deve ter pelo menos 6 caracteres', 'error');
+                return;
+            }
+            
+            try {
+                showLoading(true);
+                await createUserWithEmailAndPassword(auth, email, password);
+            } catch (error) {
+                showStatus('Erro ao criar conta: ' + error.message, 'error');
+                showLoading(false);
+            }
+        });
+        
+        document.getElementById('linkWhatsApp').addEventListener('click', async () => {
+            const whatsappNumber = document.getElementById('whatsappNumber').value;
+            
+            if (!whatsappNumber) {
+                showStatus('Digite seu número do WhatsApp', 'error');
+                return;
+            }
+            
+            try {
+                showLoading(true);
+                const idToken = await currentUser.getIdToken();
+                
+                const response = await fetch('/api/auth/link-whatsapp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${idToken}`
+                    },
+                    body: JSON.stringify({ whatsappNumber })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showStatus('WhatsApp vinculado com sucesso! Redirecionando...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 2000);
+                } else {
+                    showStatus('Erro ao vincular WhatsApp: ' + data.error, 'error');
+                }
+                
+            } catch (error) {
+                showStatus('Erro ao vincular WhatsApp: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        });
+        
+        // Máscara para telefone
+        document.getElementById('whatsappNumber').addEventListener('input', (e) => {
+            let value = e.target.value.replace(/\D/g, '');
+            if (value.length <= 11) {
+                value = value.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+                e.target.value = value;
+            }
+        });
+        
+        // Inicializar
+        initFirebase();
+    </script>
+</body>
+</html>

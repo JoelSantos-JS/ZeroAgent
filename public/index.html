@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 Financial WhatsApp Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            border-left: 5px solid #25D366;
+        }
+        
+        .status-card h4 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+        
+        .status-card p {
+            color: #666;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .controls {
+            background: #e8f5e8;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .controls h3 {
+            color: #25D366;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .btn {
+            background: #25D366;
+            color: white;
+            padding: 15px 25px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .btn:hover {
+            background: #128C7E;
+            transform: translateY(-2px);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .auth-info {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .auth-info h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+        
+        .auth-info p {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+        
+        .auth-info a {
+            color: #25D366;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .auth-info a:hover {
+            text-decoration: underline;
+        }
+        
+        .api-docs {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .api-docs h3 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .endpoint {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #25D366;
+        }
+        
+        .endpoint strong {
+            color: #25D366;
+            font-size: 1.1rem;
+        }
+        
+        .endpoint p {
+            color: #666;
+            margin: 5px 0;
+        }
+        
+        pre {
+            background: #f1f1f1;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            margin-top: 10px;
+        }
+        
+        #result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            min-height: 100px;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #25D366;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        
+        .feature {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+        
+        .feature h4 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .feature p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖💰 Financial WhatsApp Agent</h1>
+            <p>Seu assistente financeiro inteligente com autenticação automática via WhatsApp</p>
+        </div>
+        
+        <div class="content">
+            <!-- Informações de Autenticação -->
+            <div class="auth-info">
+                <h4>🔐 Autenticação via Email e Senha no WhatsApp</h4>
+                <p><strong>Como funciona:</strong> Ao enviar sua primeira mensagem, o agente solicitará seu email e senha para autenticação.</p>
+                <p><strong>Segurança:</strong> Seus dados são protegidos por login obrigatório via WhatsApp.</p>
+                <p><strong>Isolamento:</strong> Cada usuário autenticado tem dados completamente separados.</p>
+                <p><strong>Opcional:</strong> <a href="/auth">🔐 Login direto via Firebase</a> para acesso web.</p>
+            </div>
+            
+            <!-- Status do Sistema -->
+            <div class="status-grid">
+                <div class="status-card">
+                    <h4>🤖 Agente Financeiro</h4>
+                    <p>Status: <span id="agentStatus">Verificando...</span></p>
+                    <p>IA: Gemini AI</p>
+                </div>
+                
+                <div class="status-card">
+                    <h4>📱 WhatsApp</h4>
+                    <p>Conectado: <span id="whatsappStatus">Verificando...</span></p>
+                    <p>Status: <span id="connectionStatus">Verificando...</span></p>
+                </div>
+                
+                <div class="status-card">
+                    <h4>📊 Banco de Dados</h4>
+                    <p>Status: <span id="dbStatus">Verificando...</span></p>
+                    <p>Tipo: Supabase</p>
+                </div>
+                
+                <div class="status-card">
+                    <h4>🧠 Gemini AI</h4>
+                    <p>Status: <span id="geminiStatus">Verificando...</span></p>
+                    <p>Análise: Inteligente</p>
+                </div>
+            </div>
+            
+            <!-- Controles -->
+            <div class="controls">
+                <h3>🎛️ Controles do Sistema</h3>
+                <div class="button-grid">
+                    <button class="btn" onclick="checkStatus()">
+                        <span>📊</span>
+                        Verificar Status
+                    </button>
+                    <button class="btn" onclick="initWhatsApp()">
+                        <span>🚀</span>
+                        Inicializar WhatsApp
+                    </button>
+                    <button class="btn" onclick="getQR()">
+                        <span>📱</span>
+                        Obter QR Code
+                    </button>
+                    <button class="btn" onclick="testMessage()">
+                        <span>💬</span>
+                        Testar Mensagem
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Resultado -->
+            <div id="result">
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>Carregando...</p>
+                </div>
+                <p style="text-align: center; color: #666;">Clique em um botão acima para começar</p>
+            </div>
+            
+            <!-- Recursos -->
+            <div class="features">
+                <div class="feature">
+                    <div class="feature-icon">🔐</div>
+                    <h4>Autenticação Segura</h4>
+                    <p>Login obrigatório via email e senha no WhatsApp para máxima segurança</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">🤖</div>
+                    <h4>IA Avançada</h4>
+                    <p>Gemini AI para análise inteligente de transações financeiras</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">📊</div>
+                    <h4>Relatórios Detalhados</h4>
+                    <p>Estatísticas e análises personalizadas por usuário</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">🔒</div>
+                    <h4>Dados Seguros</h4>
+                    <p>Isolamento completo de dados entre usuários</p>
+                </div>
+            </div>
+            
+            <!-- Documentação da API -->
+            <div class="api-docs">
+                <h3>📚 Documentação da API</h3>
+                
+                <div class="endpoint">
+                    <strong>GET /api/status</strong>
+                    <p>Obter status de todos os serviços do sistema</p>
+                </div>
+                
+                <div class="endpoint">
+                    <strong>POST /api/whatsapp/initialize</strong>
+                    <p>Inicializar conexão com WhatsApp</p>
+                </div>
+                
+                <div class="endpoint">
+                    <strong>GET /api/whatsapp/qr</strong>
+                    <p>Obter QR Code para autenticação do WhatsApp</p>
+                </div>
+                
+                <div class="endpoint">
+                    <strong>POST /api/auth/login</strong>
+                    <p>Autenticação via Firebase (opcional)</p>
+                    <pre>{"idToken": "firebase_id_token"}</pre>
+                </div>
+                
+                <div class="endpoint">
+                    <strong>GET /api/user/stats</strong>
+                    <p>Estatísticas do usuário autenticado (requer autenticação Firebase)</p>
+                </div>
+                
+                <div class="endpoint">
+                    <strong>POST /api/process-message</strong>
+                    <p>Processar mensagem de teste</p>
+                    <pre>{
+  "message": "Gastei 50 reais no supermercado",
+  "from": "5511999999999@c.us"
+}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Verificar status automaticamente ao carregar
+        window.addEventListener('load', () => {
+            checkStatus();
+        });
+        
+        function showLoading(show = true) {
+            const loading = document.getElementById('loading');
+            if (loading) {
+                loading.style.display = show ? 'block' : 'none';
+            }
+        }
+        
+        function checkStatus() {
+            console.log('Verificando status do sistema...');
+            showLoading(true);
+            
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Status recebido:', data);
+                    
+                    // Atualizar status na interface
+                    const agentStatus = document.getElementById('agentStatus');
+                    if (agentStatus) {
+                        agentStatus.textContent = data.services.financialAgent?.isInitialized ? '✅ Ativo' : '❌ Inativo';
+                    }
+                    
+                    const whatsappStatus = document.getElementById('whatsappStatus');
+                    if (whatsappStatus) {
+                        whatsappStatus.textContent = data.services.whatsapp?.isReady ? '✅ Conectado' : '❌ Desconectado';
+                    }
+                    
+                    const connectionStatus = document.getElementById('connectionStatus');
+                    if (connectionStatus) {
+                        connectionStatus.textContent = data.services.whatsapp?.connectionStatus || 'Desconhecido';
+                    }
+                    
+                    const dbStatus = document.getElementById('dbStatus');
+                    if (dbStatus) {
+                        dbStatus.textContent = data.services.database?.connected ? '✅ Conectado' : '❌ Desconectado';
+                    }
+                    
+                    const geminiStatus = document.getElementById('geminiStatus');
+                    if (geminiStatus) {
+                        geminiStatus.textContent = data.services.gemini?.isReady ? '✅ Ativo' : '❌ Inativo';
+                    }
+                    
+                    // Mostrar resultado detalhado
+                    document.getElementById('result').innerHTML = 
+                        '<div class="success">' +
+                        '<h3>📊 Status Atualizado</h3>' +
+                        '<p><strong>Última verificação:</strong> ' + new Date().toLocaleString() + '</p>' +
+                        '<p><strong>Versão:</strong> ' + data.version + '</p>' +
+                        '<p><strong>Autenticação:</strong> Automática via WhatsApp + Firebase opcional</p>' +
+                        '</div>';
+                })
+                .catch(err => {
+                    console.error('Erro ao verificar status:', err);
+                    document.getElementById('result').innerHTML = 
+                        '<div class="error"><h3>❌ Erro ao verificar status</h3><p>' + err.message + '</p></div>';
+                })
+                .finally(() => {
+                    showLoading(false);
+                });
+        }
+        
+        function initWhatsApp() {
+            console.log('Inicializando WhatsApp...');
+            showLoading(true);
+            
+            document.getElementById('result').innerHTML = 
+                '<div style="text-align: center; padding: 20px;">' +
+                '<h3>🚀 Inicializando WhatsApp...</h3>' +
+                '<p>Aguarde, isso pode levar alguns segundos...</p>' +
+                '</div>';
+            
+            fetch('/api/whatsapp/initialize', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Resposta da inicialização:', data);
+                    
+                    if (data.success) {
+                        document.getElementById('result').innerHTML = 
+                            '<div class="success">' +
+                            '<h3>✅ WhatsApp Inicializado com Sucesso!</h3>' +
+                            '<p>' + data.message + '</p>' +
+                            '<p><strong>Próximo passo:</strong> Clique em "Obter QR Code" para conectar seu WhatsApp.</p>' +
+                            '<p><strong>Autenticação:</strong> Usuários serão criados automaticamente ao enviar mensagens!</p>' +
+                            '</div>';
+                    } else {
+                        document.getElementById('result').innerHTML = 
+                            '<div class="error">' +
+                            '<h3>❌ Erro na Inicialização</h3>' +
+                            '<p>' + (data.error || 'Erro desconhecido') + '</p>' +
+                            '</div>';
+                    }
+                })
+                .catch(err => {
+                    console.error('Erro ao inicializar:', err);
+                    document.getElementById('result').innerHTML = 
+                        '<div class="error"><h3>❌ Erro na inicialização</h3><p>' + err.message + '</p></div>';
+                })
+                .finally(() => {
+                    showLoading(false);
+                });
+        }
+        
+        function getQR() {
+            console.log('Obtendo QR Code...');
+            showLoading(true);
+            
+            fetch('/api/whatsapp/qr')
+                .then(r => r.json())
+                .then(data => {
+                    console.log('QR Code recebido:', data);
+                    
+                    if (data.qrCodeSvg) {
+                        document.getElementById('result').innerHTML = 
+                            '<div class="success">' +
+                            '<h3>📱 QR Code Gerado!</h3>' +
+                            '<p><strong>Status:</strong> ' + data.status + '</p>' +
+                            '<div style="text-align: center; margin: 20px 0; background: white; padding: 20px; border-radius: 10px;">' +
+                            data.qrCodeSvg +
+                            '</div>' +
+                            '<div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 15px 0;">' +
+                            '<h4>📋 Instruções:</h4>' +
+                            '<ol style="text-align: left; margin: 10px 0;">' +
+                            '<li>Abra o WhatsApp no seu celular</li>' +
+                            '<li>Vá em <strong>Configurações</strong> > <strong>Aparelhos conectados</strong></li>' +
+                            '<li>Toque em <strong>"Conectar um aparelho"</strong></li>' +
+                            '<li>Use a câmera para escanear o QR Code acima</li>' +
+                            '</ol>' +
+                            '<p style="margin-top: 15px;"><strong>🔐 Autenticação Automática:</strong> Após conectar, qualquer pessoa que enviar mensagem será automaticamente registrada como usuário!</p>' +
+                            '</div>' +
+                            '<button class="btn" onclick="checkStatus()" style="margin-top: 15px;">🔄 Verificar Status</button>' +
+                            '</div>';
+                    } else {
+                        document.getElementById('result').innerHTML = 
+                            '<div class="error">' +
+                            '<h3>❌ QR Code não disponível</h3>' +
+                            '<p><strong>Status:</strong> ' + data.status + '</p>' +
+                            '<p>Clique em <strong>"Inicializar WhatsApp"</strong> primeiro.</p>' +
+                            '</div>';
+                    }
+                })
+                .catch(err => {
+                    console.error('Erro ao obter QR:', err);
+                    document.getElementById('result').innerHTML = 
+                        '<div class="error"><h3>❌ Erro ao obter QR Code</h3><p>' + err.message + '</p></div>';
+                })
+                .finally(() => {
+                    showLoading(false);
+                });
+        }
+        
+        function testMessage() {
+            console.log('Testando mensagem...');
+            showLoading(true);
+            
+            const testData = {
+                message: "Gastei 50 reais com cimento hoje",
+                from: "5511999999999@c.us"
+            };
+            
+            fetch('/api/process-message', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(testData)
+            })
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Resposta do teste:', data);
+                    
+                    if (data.success) {
+                        document.getElementById('result').innerHTML = 
+                            '<div class="success">' +
+                            '<h3>✅ Mensagem Processada com Sucesso!</h3>' +
+                            '<p><strong>Usuário:</strong> Criado/encontrado automaticamente</p>' +
+                            '<p><strong>Mensagem:</strong> "' + testData.message + '"</p>' +
+                            '<p><strong>Resposta:</strong> ' + (data.response || 'Processada com sucesso') + '</p>' +
+                            '<p><strong>🔐 Autenticação:</strong> Usuário autenticado automaticamente via WhatsApp!</p>' +
+                            '</div>';
+                    } else {
+                        document.getElementById('result').innerHTML = 
+                            '<div class="error">' +
+                            '<h3>❌ Erro no Processamento</h3>' +
+                            '<p>' + (data.error || 'Erro desconhecido') + '</p>' +
+                            '</div>';
+                    }
+                })
+                .catch(err => {
+                    console.error('Erro no teste:', err);
+                    document.getElementById('result').innerHTML = 
+                        '<div class="error"><h3>❌ Erro no teste</h3><p>' + err.message + '</p></div>';
+                })
+                .finally(() => {
+                    showLoading(false);
+                });
+        }
+    </script>
+</body>
+</html>

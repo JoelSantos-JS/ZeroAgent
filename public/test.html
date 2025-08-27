@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste JavaScript</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .button { background: #25D366; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        .button:hover { background: #128C7E; }
+        #result { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Teste JavaScript</h1>
+        
+        <div>
+            <button class="button" onclick="testBasicFunction()">Teste Básico</button>
+            <button class="button" onclick="testAPI()">Teste API</button>
+            <button class="button" onclick="testFetch()">Teste Fetch</button>
+        </div>
+        
+        <div id="result">
+            <p>Clique nos botões para testar...</p>
+        </div>
+    </div>
+    
+    <script>
+        function testBasicFunction() {
+            console.log('Função básica executada!');
+            document.getElementById('result').innerHTML = 
+                '<h3>✅ Teste Básico</h3>' +
+                '<p>JavaScript está funcionando!</p>' +
+                '<p>Timestamp: ' + new Date().toLocaleTimeString() + '</p>';
+        }
+        
+        function testAPI() {
+            console.log('Testando API...');
+            document.getElementById('result').innerHTML = '<h3>Testando API...</h3>';
+            
+            fetch('/api/status')
+                .then(response => {
+                    console.log('Status da resposta:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Dados recebidos:', data);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>✅ API Funcionando!</h3>' +
+                        '<p>App: ' + data.app + '</p>' +
+                        '<p>Versão: ' + data.version + '</p>' +
+                        '<p>Timestamp: ' + data.timestamp + '</p>';
+                })
+                .catch(error => {
+                    console.error('Erro na API:', error);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>❌ Erro na API</h3>' +
+                        '<p>Erro: ' + error.message + '</p>';
+                });
+        }
+        
+        function testFetch() {
+            console.log('Testando fetch...');
+            document.getElementById('result').innerHTML = '<h3>Testando fetch...</h3>';
+            
+            // Teste simples de fetch
+            fetch('https://httpbin.org/get')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Fetch funcionando:', data);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>✅ Fetch Funcionando!</h3>' +
+                        '<p>URL: ' + data.url + '</p>' +
+                        '<p>Origin: ' + data.origin + '</p>';
+                })
+                .catch(error => {
+                    console.error('Erro no fetch:', error);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>❌ Erro no Fetch</h3>' +
+                        '<p>Erro: ' + error.message + '</p>';
+                });
+        }
+        
+        // Teste automático ao carregar a página
+        window.onload = function() {
+            console.log('Página carregada!');
+            document.getElementById('result').innerHTML = 
+                '<h3>📄 Página Carregada</h3>' +
+                '<p>JavaScript está ativo e funcionando!</p>' +
+                '<p>Carregado em: ' + new Date().toLocaleTimeString() + '</p>';
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "database": {
+    "type": "supabase",
+    "url": "sua_url_do_banco",
+    "key": "sua_chave_do_supabase"
+  },
+  "gemini": {
+    "apiKey": "sua_chave_da_api_gemini"
+  },
+  "whatsapp": {
+    "sessionName": "financial-agent-session",
+    "timeout": 60000
+  },
+  "server": {
+    "port": 3000,
+    "environment": "development"
+  }
+}

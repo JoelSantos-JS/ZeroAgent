@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug - Financial Agent</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #25D366; text-align: center; }
+        .button { background: #25D366; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        .button:hover { background: #128C7E; }
+        #result { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; }
+        .debug { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 3px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐛 Debug - Financial Agent</h1>
+        
+        <div class="debug">
+            <strong>Debug Info:</strong><br>
+            Página carregada em: <span id="loadTime"></span><br>
+            JavaScript ativo: <span id="jsStatus">Verificando...</span><br>
+            Console disponível: <span id="consoleStatus">Verificando...</span>
+        </div>
+        
+        <div>
+            <button class="button" onclick="testClick()">Teste Clique</button>
+            <button class="button" onclick="testStatus()">Teste Status API</button>
+            <button class="button" onclick="testWhatsApp()">Teste WhatsApp</button>
+        </div>
+        
+        <div id="result">
+            <p>Clique nos botões para testar...</p>
+        </div>
+    </div>
+    
+    <script>
+        // Debug inicial
+        document.getElementById('loadTime').textContent = new Date().toLocaleTimeString();
+        document.getElementById('jsStatus').textContent = '✅ Ativo';
+        document.getElementById('consoleStatus').textContent = '✅ Disponível';
+        
+        console.log('=== DEBUG PAGE LOADED ===');
+        console.log('Timestamp:', new Date().toISOString());
+        console.log('User Agent:', navigator.userAgent);
+        console.log('Window size:', window.innerWidth, 'x', window.innerHeight);
+        
+        function testClick() {
+            console.log('=== TESTE CLIQUE ===');
+            const now = new Date().toLocaleTimeString();
+            console.log('Botão clicado em:', now);
+            
+            document.getElementById('result').innerHTML = 
+                '<h3>✅ Clique Funcionando!</h3>' +
+                '<p>Botão clicado em: ' + now + '</p>' +
+                '<p>JavaScript está funcionando corretamente.</p>';
+        }
+        
+        function testStatus() {
+            console.log('=== TESTE STATUS API ===');
+            document.getElementById('result').innerHTML = '<h3>Testando API...</h3>';
+            
+            fetch('/api/status')
+                .then(response => {
+                    console.log('Status da resposta:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Dados da API:', data);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>✅ API Funcionando!</h3>' +
+                        '<p><strong>App:</strong> ' + data.app + '</p>' +
+                        '<p><strong>Versão:</strong> ' + data.version + '</p>' +
+                        '<p><strong>Timestamp:</strong> ' + data.timestamp + '</p>' +
+                        '<p><strong>Agente Financeiro:</strong> ' + (data.services.financialAgent.isInitialized ? '✅ Ativo' : '❌ Inativo') + '</p>';
+                })
+                .catch(error => {
+                    console.error('Erro na API:', error);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>❌ Erro na API</h3>' +
+                        '<p>Erro: ' + error.message + '</p>';
+                });
+        }
+        
+        function testWhatsApp() {
+            console.log('=== TESTE WHATSAPP ===');
+            document.getElementById('result').innerHTML = '<h3>Testando WhatsApp...</h3>';
+            
+            fetch('/api/whatsapp/initialize', { method: 'POST' })
+                .then(response => {
+                    console.log('Status da resposta WhatsApp:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Dados WhatsApp:', data);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>✅ WhatsApp Testado!</h3>' +
+                        '<p><strong>Sucesso:</strong> ' + (data.success ? '✅ Sim' : '❌ Não') + '</p>' +
+                        '<p><strong>Mensagem:</strong> ' + (data.message || data.error || 'N/A') + '</p>';
+                })
+                .catch(error => {
+                    console.error('Erro no WhatsApp:', error);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>❌ Erro no WhatsApp</h3>' +
+                        '<p>Erro: ' + error.message + '</p>';
+                });
+        }
+        
+        // Teste automático
+        setTimeout(() => {
+            console.log('Teste automático executado');
+            document.getElementById('result').innerHTML = 
+                '<h3>🔄 Teste Automático</h3>' +
+                '<p>Página carregada e JavaScript funcionando!</p>' +
+                '<p>Verifique o console do navegador para mais detalhes.</p>';
+        }, 2000);
+    </script>
+</body>
+</html> 
