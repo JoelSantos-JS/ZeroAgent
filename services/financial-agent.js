@@ -4,8 +4,22 @@ const userService = require('./user-service');
 const geminiService = require('./gemini-service');
 const AudioProcessor = require('./audio-processor');
 const logger = require('../utils/logger');
-const moment = require('moment');
 
+// Importar handlers especializados
+const ExpenseHandler = require('./handlers/expense-handler');
+const IncomeHandler = require('./handlers/income-handler');
+const InvestmentHandler = require('./handlers/investment-handler');
+const QueryHandler = require('./handlers/query-handler');
+
+// Importar utilitários
+const DataParser = require('./parsers/data-parser');
+const ResponseFormatter = require('./formatters/response-formatter');
+const TransactionValidator = require('./validators/transaction-validator');
+
+/**
+ * Agente Financeiro Principal - Arquitetura Modular
+ * Coordena handlers especializados para diferentes tipos de transações
+ */
 class FinancialAgent {
   constructor() {
     this.isInitialized = false;
@@ -13,17 +27,33 @@ class FinancialAgent {
     this.conversationHistory = new Map(); // phoneNumber -> array of last messages
     this.maxHistorySize = 5; // Manter últimas 5 mensagens por usuário
     this.audioProcessor = new AudioProcessor(); // Processador de áudio
+    
+    // Inicializar handlers especializados
+    this.handlers = {
+      expense: null,
+      income: null,
+      investment: null,
+      query: null
+    };
   }
 
-  // Inicializar o agente financeiro
+  /**
+   * Inicializar o agente financeiro e todos os handlers
+   */
   async initialize() {
     try {
       console.log('🤖 Inicializando Agente Financeiro...');
       
-      // Inicializar serviços
+      // Inicializar serviços base
       await databaseService.initialize();
       await geminiService.initialize();
       await this.audioProcessor.initialize();
+      
+      // Inicializar handlers especializados
+      this.handlers.expense = new ExpenseHandler(databaseService, userService);
+      this.handlers.income = new IncomeHandler(databaseService, userService);
+      this.handlers.investment = new InvestmentHandler(databaseService, userService);
+      this.handlers.query = new QueryHandler(databaseService, userService);
       
       // Configurar processador de mensagens no WhatsApp Service
       whatsappService.setMessageProcessor(this);
@@ -39,7 +69,11 @@ class FinancialAgent {
     }
   }
 
-  // Processar mensagem recebida do WhatsApp
+  /**
+   * Processar mensagem recebida do WhatsApp
+   * @param {Object} message - Mensagem do WhatsApp
+   * @returns {Promise<string|null>} - Resposta para o usuário
+   */
   async processMessage(message) {
     const messageId = message.id._serialized;
     
@@ -49,100 +83,25 @@ class FinancialAgent {
       return null;
     }
     
-    this.processingQueue.set(messageId, true);
+    this.processingQueue.set(messageId, Date.now());
     
     try {
+      console.log('📨 Mensagem recebida de', message.from + ':', message.body);
+      logger.info('Mensagem recebida', {
+        from: message.from,
+        body: message.body
+      });
+      
+      // Adicionar ao histórico de conversação
+      this.addToConversationHistory(message.from, message.body, 'user');
+      
       // Verificar se é mensagem de áudio
-      if (message.hasAudio && message.audioBuffer) {
-        console.log('🎙️ Processando mensagem de áudio...');
+      if (message.hasMedia && message.type === 'audio') {
         return await this.processAudioMessage(message);
       }
       
-      // Processar mensagem de texto normal
-      console.log(`🔄 Processando mensagem: ${message.body}`);
-      
-      // Adicionar mensagem do usuário ao histórico
-      this.addToConversationHistory(message.from, message.body, 'user');
-      
-      // Verificar se usuário está autenticado
-      const authStatus = await this.checkUserAuthentication(message.from);
-      
-      if (!authStatus.isAuthenticated) {
-        // Processar fluxo de autenticação
-        const authResponse = await this.handleAuthenticationFlow(message.from, message.body, authStatus.step);
-        return authResponse;
-      }
-      
-      // Usuário autenticado - processar mensagem normalmente
-      const user = authStatus.user;
-      
-      // Obter contexto da conversa
-      const conversationContext = this.getConversationContext(message.from);
-      
-      // Analisar se é uma mensagem contextual
-      const contextAnalysis = this.analyzeContextualMessage(message.body, conversationContext);
-      
-      // Processar mensagem com contexto
-      let analysisResult;
-      if (contextAnalysis.isContextual) {
-        console.log('🔗 Mensagem contextual detectada:', contextAnalysis);
-        analysisResult = {
-          tipo: 'consulta',
-          intencao: contextAnalysis.originalIntent || 'consultar_gastos',
-          categoria: 'consulta',
-          valor: 0,
-          descricao: message.body,
-          confianca: 0.9,
-          analise: 'Análise contextual baseada no histórico',
-          dica: 'Vou buscar os detalhes solicitados!'
-        };
-      } else {
-        // Processar mensagem com Gemini
-        const userContext = await this.getUserContext(user.id);
-        analysisResult = await geminiService.processFinancialMessage(message.body, userContext);
-      }
-      
-      console.log('🧠 Análise do Gemini:', analysisResult);
-      
-      // Salvar análise no histórico
-      const history = this.conversationHistory.get(message.from);
-      if (history && history.length > 0) {
-        history[history.length - 1].analysis = analysisResult;
-      }
-      
-      // Processar baseado no tipo identificado
-      let response;
-      switch (analysisResult.tipo) {
-        case 'receita':
-          response = await this.processIncomeTransaction(user.id, analysisResult);
-          break;
-        case 'despesa_fixa':
-        case 'despesa_variavel':
-          response = await this.processExpenseTransaction(user.id, analysisResult);
-          break;
-        case 'investimento':
-          response = await this.processInvestmentTransaction(user.id, analysisResult);
-          break;
-        case 'consulta':
-          // Verificar se é consulta detalhada
-          if (analysisResult.intencao === 'consultar_gastos_detalhado' || 
-              (contextAnalysis.isContextual && contextAnalysis.referenceType.includes('consulta'))) {
-            response = await this.processDetailedQuery(user.id, analysisResult);
-          } else {
-            response = await this.processQuery(user.id, analysisResult);
-          }
-          break;
-        default:
-          response = await this.processOtherMessage(user.id, analysisResult);
-      }
-      
-      logger.info('Mensagem processada com sucesso', {
-        userId: user.id,
-        messageType: analysisResult.tipo,
-        confidence: analysisResult.confianca
-      });
-      
-      return response;
+      // Processar mensagem de texto
+      return await this.processTextMessage(message);
       
     } catch (error) {
       console.error('❌ Erro ao processar mensagem:', error);
@@ -154,14 +113,104 @@ class FinancialAgent {
       return '❌ Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente em alguns instantes.';
       
     } finally {
-      // Remover da fila de processamento
+      // Remover da fila de processamento após 5 segundos
       setTimeout(() => {
         this.processingQueue.delete(messageId);
-      }, 5000); // Manter por 5 segundos para evitar duplicatas
+      }, 5000);
     }
   }
 
-  // Processar mensagem de áudio
+  /**
+   * Processar mensagem de texto
+   * @param {Object} message - Mensagem do WhatsApp
+   * @returns {Promise<string>} - Resposta para o usuário
+   */
+  async processTextMessage(message) {
+    console.log('🔄 Processando mensagem:', message.body);
+    
+    // Verificar autenticação
+    const authStatus = await this.checkUserAuthentication(message.from);
+    
+    if (!authStatus.isAuthenticated) {
+      return await this.handleAuthenticationFlow(message.from, message.body, authStatus.step);
+    }
+    
+    const user = authStatus.user;
+    console.log('🔍 Verificando autenticação para:', message.from);
+    console.log('👤 Usuário existente encontrado:', user.email);
+    
+    // Analisar contexto da conversa
+    const contextAnalysis = this.analyzeConversationContext(message.from, message.body);
+    
+    let analysisResult;
+    
+    if (contextAnalysis.isContextual) {
+      // Usar análise contextual
+      analysisResult = await this.processContextualMessage(message.body, contextAnalysis, user.id);
+    } else {
+      // Processar mensagem com Gemini
+      const userContext = await this.getUserContext(user.id);
+      analysisResult = await geminiService.processFinancialMessage(message.body, userContext);
+    }
+    
+    console.log('🧠 Análise do Gemini:', analysisResult);
+    
+    // Salvar análise no histórico
+    const history = this.conversationHistory.get(message.from);
+    if (history && history.length > 0) {
+      history[history.length - 1].analysis = analysisResult;
+    }
+    
+    // Processar baseado no tipo identificado usando handlers especializados
+    const response = await this.routeToHandler(user.id, analysisResult);
+    
+    logger.info('Mensagem processada com sucesso', {
+      userId: user.id,
+      messageType: analysisResult.tipo,
+      confidence: analysisResult.confianca
+    });
+    
+    return response;
+  }
+
+  /**
+   * Rotear para o handler apropriado baseado no tipo de transação
+   * @param {string} userId - ID do usuário
+   * @param {Object} analysisResult - Resultado da análise do Gemini
+   * @returns {Promise<string>} - Resposta formatada
+   */
+  async routeToHandler(userId, analysisResult) {
+    try {
+      const { tipo } = analysisResult;
+      
+      switch (tipo) {
+        case 'receita':
+          return await this.handlers.income.process(userId, analysisResult);
+          
+        case 'despesa_fixa':
+        case 'despesa_variavel':
+          return await this.handlers.expense.process(userId, analysisResult);
+          
+        case 'investimento':
+          return await this.handlers.investment.process(userId, analysisResult);
+          
+        case 'consulta':
+          return await this.handlers.query.process(userId, analysisResult);
+          
+        default:
+          return await this.handleOtherMessage(userId, analysisResult);
+      }
+    } catch (error) {
+      console.error('❌ Erro ao rotear para handler:', error);
+      return ResponseFormatter.formatErrorMessage('transação', analysisResult.valor, error.message);
+    }
+  }
+
+  /**
+   * Processar mensagem de áudio
+   * @param {Object} message - Mensagem do WhatsApp
+   * @returns {Promise<string>} - Resposta para o usuário
+   */
   async processAudioMessage(message) {
     try {
       console.log('🎵 Iniciando processamento de áudio...');
@@ -199,315 +248,151 @@ class FinancialAgent {
       // Adicionar transcrição ao histórico
       this.addToConversationHistory(message.from, audioResult.transcription, 'user');
       
-      // Processar dados financeiros extraídos
-      const analysisResult = {
-        tipo: audioResult.financialData.tipo,
-        valor: audioResult.financialData.valor,
-        categoria: audioResult.financialData.categoria,
-        descricao: audioResult.financialData.descricao,
-        data: audioResult.financialData.data,
-        intencao: this.mapTypeToIntention(audioResult.financialData.tipo),
-        confianca: audioResult.financialData.confianca,
-        analise: `Análise de áudio (${audioResult.optimization.tokenSavings} tokens economizados)`,
-        dica: this.generateAudioTip(audioResult)
-      };
-      
-      // Processar baseado no tipo de transação
-      let response;
-      
-      if (analysisResult.tipo === 'receita') {
-        response = await this.processIncomeTransaction(user.id, analysisResult);
-      } else if (analysisResult.tipo === 'despesa' || analysisResult.tipo === 'despesa_fixa' || analysisResult.tipo === 'despesa_variavel') {
-        response = await this.processExpenseTransaction(user.id, analysisResult);
-      } else if (analysisResult.tipo === 'investimento') {
-        response = await this.processInvestmentTransaction(user.id, analysisResult);
-      } else if (analysisResult.tipo === 'consulta') {
-        response = await this.processQuery(user.id, analysisResult);
+      // Processar dados financeiros extraídos do áudio
+      if (audioResult.financialData) {
+        return await this.routeToHandler(user.id, audioResult.financialData);
       } else {
-        response = await this.processOtherMessage(user.id, analysisResult);
+        return '🎵 Áudio processado, mas não consegui identificar informações financeiras. Pode repetir de forma mais clara?';
       }
-      
-      // Adicionar informações sobre a otimização do áudio
-      const optimizationInfo = `\n\n📊 *Processamento otimizado:* ${audioResult.optimization.tokenSavingsPercent} economia de tokens`;
-      
-      return response + optimizationInfo;
       
     } catch (error) {
       console.error('❌ Erro no processamento de áudio:', error);
-      logger.error('Erro no processamento de áudio', {
-        from: message.from,
-        error: error.message
-      });
-      
-      return '❌ Erro ao processar áudio. Por favor, tente novamente ou digite sua transação.';
+      return '❌ Erro ao processar áudio. Tente enviar uma mensagem de texto.';
     }
   }
-  
-  // Mapear tipo para intenção
-  mapTypeToIntention(tipo) {
-    const mapping = {
-      'receita': 'registrar_receita',
-      'despesa': 'registrar_despesa',
-      'despesa_fixa': 'registrar_despesa',
-      'despesa_variavel': 'registrar_despesa',
-      'investimento': 'registrar_investimento',
-      'consulta': 'consultar_gastos',
-      'outros': 'registrar'
-    };
-    
-    return mapping[tipo] || 'registrar';
-  }
-  
-  // Gerar dica específica para áudio
-  generateAudioTip(audioResult) {
-    const tips = [
-      '🎙️ Áudio processado com sucesso! Continue usando áudios para registros mais rápidos.',
-      '⚡ Processamento otimizado economizou tokens. Fale de forma clara para melhores resultados.',
-      '🔊 Dica: Fale pausadamente e mencione o valor e categoria para análises mais precisas.'
-    ];
-    
-    return tips[Math.floor(Math.random() * tips.length)];
-  }
 
-  // Adicionar mensagem ao histórico de conversa
-   addToConversationHistory(phoneNumber, message, type = 'user') {
-     if (!this.conversationHistory.has(phoneNumber)) {
-       this.conversationHistory.set(phoneNumber, []);
-     }
-     
-     const history = this.conversationHistory.get(phoneNumber);
-     history.push({
-       message: message,
-       type: type, // 'user' ou 'bot'
-       timestamp: new Date(),
-       analysis: null
-     });
-     
-     // Manter apenas as últimas mensagens
-     if (history.length > this.maxHistorySize) {
-       history.shift();
-     }
-   }
-   
-   // Obter contexto da conversa
-   getConversationContext(phoneNumber) {
-     const history = this.conversationHistory.get(phoneNumber) || [];
-     return history.slice(-3); // Últimas 3 mensagens para contexto
-   }
-   
-   // Analisar se mensagem atual é contextual baseada no histórico
-    analyzeContextualMessage(message, history) {
-      const messageLower = message.toLowerCase();
+  /**
+   * Verificar autenticação do usuário
+   * @param {string} phoneNumber - Número do WhatsApp
+   * @returns {Promise<Object>} - Status da autenticação
+   */
+  async checkUserAuthentication(phoneNumber) {
+    try {
+      // Primeiro, verificar se existe usuário pelo WhatsApp
+      const existingUser = await databaseService.getUserByWhatsApp(phoneNumber);
       
-      // Palavras que indicam referência a mensagem anterior
-      const contextualWords = {
-        consulta: ['mostre', 'detalhe', 'cada', 'lista', 'veja', 'exiba', 'me fale', 'conte', 
-                  'explique', 'isso', 'elas', 'eles', 'me diga', 'mostra', 'apresente',
-                  'discrimine', 'especifique', 'detalha', 'uma por uma', 'separadamente'],
-        confirmacao: ['sim', 'ok', 'certo', 'confirmo', 'pode', 'vai', 'continua', 'prossiga'],
-        negacao: ['não', 'nao', 'cancel', 'para', 'stop', 'volta', 'sair']
-      };
-      
-      // Verificar diferentes tipos de contexto
-      if (history.length > 0) {
-        const lastMessage = history[history.length - 1];
-        const lastBotMessage = history.slice().reverse().find(h => h.type === 'bot');
-        
-        // 1. Referência direta a consulta anterior
-        const hasConsultaWord = contextualWords.consulta.some(word => messageLower.includes(word));
-        if (hasConsultaWord && lastMessage.analysis && lastMessage.analysis.tipo === 'consulta') {
-          return {
-            isContextual: true,
-            referenceType: 'consulta_detalhada',
-            originalIntent: 'consultar_gastos_detalhado',
-            confidence: 0.95
-          };
+      if (existingUser) {
+        // Limpar sessões antigas (ignorar erros se não houver sessão)
+        try {
+          await databaseService.deleteUserSession(phoneNumber);
+        } catch (error) {
+          // Ignorar erro se não houver sessão para deletar
         }
         
-        // 2. Mensagens muito curtas após consulta (provável continuação)
-        if (message.length <= 20 && lastMessage.analysis && lastMessage.analysis.tipo === 'consulta') {
-          const hasConfirmacao = contextualWords.confirmacao.some(word => messageLower.includes(word));
-          if (hasConfirmacao) {
-            return {
-              isContextual: true,
-              referenceType: 'confirmacao_consulta',
-              originalIntent: 'consultar_gastos_detalhado',
-              confidence: 0.9
-            };
-          }
-        }
+        // Criar nova sessão para usuário existente
+        await databaseService.createUserSession(phoneNumber, existingUser.id);
         
-        // 3. Pronomes e referências implícitas
-        const pronouns = ['isso', 'elas', 'eles', 'essa', 'essas', 'este', 'esta'];
-        const hasPronoun = pronouns.some(word => messageLower.includes(word));
-        if (hasPronoun && history.length >= 2) {
-          const recentConsulta = history.slice(-3).find(h => h.analysis && h.analysis.tipo === 'consulta');
-          if (recentConsulta) {
-            return {
-              isContextual: true,
-              referenceType: 'pronome_referencia',
-              originalIntent: 'consultar_gastos_detalhado',
-              confidence: 0.85
-            };
-          }
-        }
-        
-        // 4. Padrão de pergunta seguida de especificação
-        if (history.length >= 2) {
-          const penultimate = history[history.length - 2];
-          if (penultimate.analysis && penultimate.analysis.tipo === 'consulta' && 
-              messageLower.length < 30 && hasConsultaWord) {
-            return {
-              isContextual: true,
-              referenceType: 'especificacao_consulta',
-              originalIntent: 'consultar_gastos_detalhado',
-              confidence: 0.9
-            };
-          }
-        }
+        return {
+          isAuthenticated: true,
+          user: existingUser,
+          step: 'authenticated'
+        };
       }
       
-      return { isContextual: false };
-    }
-
-   // Verificar autenticação do usuário
-    async checkUserAuthentication(phoneNumber) {
-      try {
-        console.log(`🔍 Verificando autenticação para: ${phoneNumber}`);
-        
-        // PRIMEIRO: Verificar se usuário já existe pelo WhatsApp
-        const existingUser = await databaseService.getUserByWhatsApp(phoneNumber);
-        if (existingUser) {
-          console.log(`👤 Usuário existente encontrado: ${existingUser.name}`);
-          
-          // Limpar sessões antigas primeiro
-          try {
-            await databaseService.deleteUserSession(phoneNumber);
-          } catch (cleanupError) {
-            console.log('🧹 Limpeza de sessão (normal se não existir)');
-          }
-          
-          // Criar nova sessão para usuário existente
-          await databaseService.createUserSession(phoneNumber, existingUser.id);
-          
-          return {
-            isAuthenticated: true,
-            user: existingUser,
-            step: null
-          };
-        }
-        
-        // Verificar se existe sessão ativa (só para usuários novos)
-        const session = await databaseService.getUserSession(phoneNumber);
-        console.log(`📋 Sessão encontrada:`, session);
-        
-        if (session && session.is_active) {
-          const user = await userService.getUserById(session.user_id);
-          console.log(`👤 Usuário encontrado:`, user?.name);
-          
+      // Verificar se há sessão ativa
+      const session = await databaseService.getUserSession(phoneNumber);
+      
+      if (session && session.user_id) {
+        const user = await databaseService.getUserById(session.user_id);
+        if (user) {
           return {
             isAuthenticated: true,
             user: user,
-            step: null
+            step: 'authenticated'
           };
         }
+      }
       
-        // Verificar se está no processo de autenticação
-        const authProcess = await databaseService.getAuthProcess(phoneNumber);
-        
-        if (authProcess) {
-          return {
-            isAuthenticated: false,
-            user: null,
-            step: authProcess.step
-          };
-        }
-        
-        // Novo usuário - iniciar processo de autenticação
+      // Verificar se há processo de autenticação em andamento
+      const authProcess = await databaseService.getAuthProcess(phoneNumber);
+      
+      if (authProcess) {
         return {
           isAuthenticated: false,
-          user: null,
-          step: 'welcome'
-        };
-        
-      } catch (error) {
-        console.error('❌ Erro ao verificar autenticação:', error);
-        return {
-          isAuthenticated: false,
-          user: null,
-          step: 'welcome'
+          step: authProcess.step,
+          data: authProcess.data
         };
       }
+      
+      // Novo usuário - iniciar processo de autenticação
+      return {
+        isAuthenticated: false,
+        step: 'welcome'
+      };
+      
+    } catch (error) {
+      console.error('❌ Erro na verificação de autenticação:', error);
+      return {
+        isAuthenticated: false,
+        step: 'welcome'
+      };
     }
+  }
 
-  // Gerenciar fluxo de autenticação
+  /**
+   * Gerenciar fluxo de autenticação
+   * @param {string} phoneNumber - Número do WhatsApp
+   * @param {string} message - Mensagem do usuário
+   * @param {string} step - Etapa atual da autenticação
+   * @returns {Promise<string>} - Resposta para o usuário
+   */
   async handleAuthenticationFlow(phoneNumber, message, step) {
     try {
       switch (step) {
         case 'welcome':
-          // Iniciar processo de autenticação
-          await databaseService.createAuthProcess(phoneNumber, 'email');
+          await databaseService.createAuthProcess(phoneNumber, 'email', {});
           return '👋 Olá! Bem-vindo ao **Financial Agent**! 🤖💰\n\n' +
-                 'Sou seu assistente financeiro pessoal e vou te ajudar a:\n' +
-                 '💰 Registrar gastos e receitas\n' +
-                 '📊 Acompanhar seu orçamento\n' +
-                 '📈 Analisar seus hábitos financeiros\n' +
-                 '🛒 Gerenciar produtos e compras\n\n' +
-                 '🔐 **Para sua segurança**, preciso que você se identifique primeiro.\n\n' +
-                 '📧 **Digite seu email:**';
+                 '📧 **Digite seu email para começar:**';
         
         case 'email':
-          // Validar email e solicitar senha
-          const email = message.trim().toLowerCase();
+          const email = message.trim();
           
-          if (!this.isValidEmail(email)) {
-            return '❌ Email inválido. Por favor, digite um email válido:';
+          // Validar email
+          const emailValidation = TransactionValidator.validateEmail(email);
+          if (!emailValidation.isValid) {
+            return ResponseFormatter.formatValidationMessage(emailValidation.errors) + 
+                   '\n\n📧 **Digite um email válido:**';
           }
           
+          // Salvar email e pedir senha
           await databaseService.updateAuthProcess(phoneNumber, 'password', { email });
-          return '✅ **Email registrado com sucesso!**\n\n🔑 **Agora digite sua senha:**\n\n💡 *Sua senha deve ter pelo menos 6 caracteres*';
+          return `✅ **Email confirmado:** ${email}\n\n🔐 **Agora digite sua senha:**`;
         
         case 'password':
-          // Validar credenciais
           const authProcess = await databaseService.getAuthProcess(phoneNumber);
           const userEmail = authProcess.data.email;
           const password = message.trim();
           
+          // Validar senha
+          const passwordValidation = TransactionValidator.validatePassword(password);
+          if (!passwordValidation.isValid) {
+            return ResponseFormatter.formatValidationMessage(passwordValidation.errors) + 
+                   '\n\n🔐 **Digite uma senha válida:**';
+          }
+          
           try {
-            // Tentar autenticar com Firebase
-            const authResult = await userService.authenticateUser(userEmail, password);
+            // Criar usuário
+            const user = await databaseService.createUser(userEmail, password, phoneNumber);
             
-            if (authResult.success) {
-              // Criar sessão
-              await databaseService.createUserSession(phoneNumber, authResult.user.id);
-              await databaseService.deleteAuthProcess(phoneNumber);
-              
-              return `🎉 **Autenticação realizada com sucesso!**\n\n` +
-                     `👋 Olá, **${authResult.user.name}**! Seja bem-vindo(a)!\n\n` +
-                     `🤖 **Agora estou pronto para te ajudar!** Você pode:\n\n` +
-                     `💰 *"Gastei 50 reais no supermercado"*\n` +
-                     `💵 *"Recebi 1000 reais de salário"*\n` +
-                     `📊 *"Quanto gastei este mês?"*\n` +
-                     `🛒 *"Comprei um notebook por 2000 reais"*\n` +
-                     `📈 *"Investi 500 reais na poupança"*\n\n` +
-                     `✨ **Como posso te ajudar hoje?**`;
-            } else {
-               // Falha na autenticação
-               await databaseService.updateAuthProcess(phoneNumber, 'email');
-               return '❌ **Email ou senha incorretos.**\n\n🔄 Vamos tentar novamente!\n\n📧 **Digite seu email:**';
-            }
+            // Criar sessão
+            await databaseService.createUserSession(phoneNumber, user.id);
+            
+            // Limpar processo de autenticação
+            await databaseService.deleteAuthProcess(phoneNumber);
+            
+            return `🎉 **Conta criada com sucesso!**\n\n` +
+                   `👋 Bem-vindo, **${user.name || user.email}**!\n\n` +
+                   ResponseFormatter.formatWelcomeMessage(user.name);
+            
           } catch (error) {
             console.error('❌ Erro no fluxo de autenticação:', error);
             
             // Se erro de constraint (usuário já existe), tentar recuperar sessão
             if (error.code === '23505' && error.message.includes('phone_number')) {
               try {
-                // Buscar usuário existente por email
-                 const existingUser = await databaseService.getUserByEmail(userEmail);
+                const existingUser = await databaseService.getUserByEmail(userEmail);
                 if (existingUser) {
-                  // Atualizar número do WhatsApp do usuário existente
                   await databaseService.updateUserWhatsApp(existingUser.id, phoneNumber);
-                  // Criar nova sessão
                   await databaseService.createUserSession(phoneNumber, existingUser.id);
                   await databaseService.deleteAuthProcess(phoneNumber);
                   
@@ -528,24 +413,24 @@ class FinancialAgent {
           }
         
         default:
-           await databaseService.deleteAuthProcess(phoneNumber);
-           return this.handleAuthenticationFlow(phoneNumber, message, 'welcome');
+          await databaseService.deleteAuthProcess(phoneNumber);
+          return this.handleAuthenticationFlow(phoneNumber, message, 'welcome');
       }
       
     } catch (error) {
-       console.error('❌ Erro no fluxo de autenticação:', error);
-       await databaseService.deleteAuthProcess(phoneNumber);
-       return '⚠️ **Ops! Algo deu errado.**\n\n🔄 Vamos recomeçar!\n\n👋 Olá! Bem-vindo ao **Financial Agent**! 🤖💰\n\n📧 **Digite seu email para começar:**';
+      console.error('❌ Erro no fluxo de autenticação:', error);
+      await databaseService.deleteAuthProcess(phoneNumber);
+      return '⚠️ **Ops! Algo deu errado.**\n\n🔄 Vamos recomeçar!\n\n' +
+             '👋 Olá! Bem-vindo ao **Financial Agent**! 🤖💰\n\n' +
+             '📧 **Digite seu email para começar:**';
     }
   }
 
-  // Validar formato de email
-  isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  }
-
-  // Obter contexto do usuário
+  /**
+   * Obter contexto do usuário
+   * @param {string} userId - ID do usuário
+   * @returns {Promise<Object>} - Contexto do usuário
+   */
   async getUserContext(userId) {
     try {
       const stats = await userService.getUserStats(userId);
@@ -556,7 +441,7 @@ class FinancialAgent {
         monthlySpent: stats.monthlySpent,
         recentTransactions: recentTransactions.map(t => ({
           value: t.amount,
-          categoria: t.category, // Corrigido: usar 'categoria' em vez de 'category'
+          categoria: t.category,
           description: t.description,
           date: t.date
         })),
@@ -568,570 +453,102 @@ class FinancialAgent {
     }
   }
 
-  // Processar transação de despesa (fixa ou variável)
-  async processExpenseTransaction(userId, analysisResult) {
-    try {
-      const { valor, categoria, descricao, data, tipo, analise, dica } = analysisResult;
-      
-      // Processar data
-      const transactionDate = this.parseDate(data);
-      
-      // Registrar transação no banco
-      const transaction = await databaseService.createTransaction(
-        userId,
-        valor,
-        categoria,
-        descricao,
-        transactionDate,
-        'other'  // Tipo da transação (enum expense_type)
-      );
-      
-      console.log(`💸 ${tipo.toUpperCase()} registrada:`, transaction);
-      
-      // Obter contexto atualizado para resposta personalizada
-      const userContext = await this.getUserContext(userId);
-      
-      // Gerar resposta mais humana e natural
-       const tipoFormatado = tipo === 'despesa_fixa' ? 'despesa fixa' : 'despesa variável';
-       const categoriaFormatada = categoria ? categoria.charAt(0).toUpperCase() + categoria.slice(1) : 'Outros';
-      
-      // Mensagens mais naturais baseadas na categoria
-      const mensagensCategoria = {
-        'alimentacao': 'Anotei seu gasto com alimentação! 🍽️',
-        'transporte': 'Registrei sua despesa de transporte! 🚗',
-        'supermercado': 'Compra do supermercado anotada! 🛒',
-        'lazer': 'Diversão também é importante! 🎉',
-        'saude': 'Cuidar da saúde é investimento! 💊',
-        'casa': 'Despesa doméstica registrada! 🏠',
-        'roupas': 'Nova peça no guarda-roupa! 👕',
-        'outros': 'Despesa registrada com sucesso! ✅'
-      };
-      
-      const mensagemInicial = mensagensCategoria[categoria] || mensagensCategoria['outros'];
-      
-      let response = `${mensagemInicial}\n`;
-      response += `💰 **R$ ${valor.toFixed(2)}** em ${categoriaFormatada}`;
-      
-      logger.info(`${tipo} registrada`, {
-        userId,
-        transactionId: transaction.id,
-        value: valor,
-        category: categoria
-      });
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao processar despesa:', error);
-      logger.error('Erro ao processar despesa', {
-        userId,
-        analysisResult,
-        error: error.message
-      });
-      
-      return `❌ Erro ao registrar despesa de R$ ${analysisResult.valor}. Tente novamente.`;
-    }
+  /**
+   * Processar outras mensagens não categorizadas
+   * @param {string} userId - ID do usuário
+   * @param {Object} analysisResult - Resultado da análise
+   * @returns {Promise<string>} - Resposta para o usuário
+   */
+  async handleOtherMessage(userId, analysisResult) {
+    // Tentar processar como consulta genérica
+    return await this.handlers.query.process(userId, analysisResult);
   }
 
-  // Processar transação de receita
-  async processIncomeTransaction(userId, analysisResult) {
-    try {
-      const { valor, categoria, descricao, data, analise, dica } = analysisResult;
-      
-      // Processar data
-      const transactionDate = this.parseDate(data);
-      
-      // Registrar receita no banco usando tabela revenues
-      const transaction = await databaseService.createRevenue(
-        userId,
-        valor,
-        categoria,
-        descricao,
-        transactionDate,
-        'other'  // Source da receita
-      );
-      
-      console.log('💰 Receita registrada:', transaction);
-      
-      // Obter contexto atualizado para resposta personalizada
-      const userContext = await this.getUserContext(userId);
-      
-      // Gerar resposta mais humana e natural
-      const categoriaFormatada = categoria ? categoria.charAt(0).toUpperCase() + categoria.slice(1) : 'Outros';
-      
-      // Mensagens mais naturais baseadas na categoria
-      const mensagensCategoria = {
-        'salario': 'Salário recebido! 💼',
-        'freelance': 'Trabalho freelance registrado! 💻',
-        'vendas': 'Venda realizada com sucesso! 💰',
-        'bonus': 'Bônus recebido! 🎉',
-        'investimento': 'Retorno de investimento! 📈',
-        'jogos': 'Ganho em jogos registrado! 🎰',
-        'outros': 'Receita registrada com sucesso! ✅'
-      };
-      
-      const mensagemInicial = mensagensCategoria[categoria] || mensagensCategoria['outros'];
-      
-      let response = `${mensagemInicial}\n`;
-      response += `💰 **R$ ${valor.toFixed(2)}** em ${categoriaFormatada}`;
-      
-      logger.info('Receita registrada', {
-        userId,
-        transactionId: transaction.id,
-        value: valor,
-        category: categoria
-      });
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao processar receita:', error);
-      logger.error('Erro ao processar receita', {
-        userId,
-        analysisResult,
-        error: error.message
-      });
-      
-      return `❌ Erro ao registrar receita de R$ ${analysisResult.valor}. Tente novamente.`;
+  /**
+   * Adicionar mensagem ao histórico de conversação
+   * @param {string} phoneNumber - Número do WhatsApp
+   * @param {string} message - Mensagem
+   * @param {string} sender - Remetente ('user' ou 'bot')
+   */
+  addToConversationHistory(phoneNumber, message, sender) {
+    if (!this.conversationHistory.has(phoneNumber)) {
+      this.conversationHistory.set(phoneNumber, []);
     }
-  }
-
-  // Processar transação de investimento
-  async processInvestmentTransaction(userId, analysisResult) {
-    try {
-      const { valor, categoria, descricao, data, analise, dica } = analysisResult;
-      
-      // Processar data
-      const transactionDate = this.parseDate(data);
-      
-      // Registrar investimento no banco
-      const transaction = await databaseService.createTransaction(
-        userId,
-        valor,
-        categoria,
-        descricao,
-        transactionDate,
-        'expense'  // Investimentos como despesa no sistema
-      );
-      
-      console.log('📈 Investimento registrado:', transaction);
-      
-      // Também registrar como produto se houver nome específico
-      if (analysisResult.produto_nome) {
-        await databaseService.createProduct(
-          userId,
-          analysisResult.produto_nome,
-          categoria,
-          valor,
-          transactionDate
-        );
-      }
-      
-      // Obter contexto atualizado
-      const userContext = await this.getUserContext(userId);
-      
-      // Gerar resposta no formato do analista financeiro
-      const currentDateTime = new Date().toLocaleString('pt-BR');
-      const response = `✅ INVESTIMENTO registrado: R$ ${valor.toFixed(2)} em ${categoria.toUpperCase()} em ${currentDateTime}\n📊 Impacto: ${analise || 'Investimento adicionado ao seu portfólio'}\n💡 Dica: ${dica || 'Parabéns por investir! Continue diversificando seus investimentos.'}`;
-      
-      logger.info('Investimento registrado', {
-        userId,
-        transactionId: transaction.id,
-        value: valor,
-        category: categoria
-      });
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao processar investimento:', error);
-      logger.error('Erro ao processar investimento', {
-        userId,
-        analysisResult,
-        error: error.message
-      });
-      
-      return `❌ Erro ao registrar investimento de R$ ${analysisResult.valor}. Tente novamente.`;
-    }
-  }
-
-  // Processar consulta
-  async processQuery(userId, analysisResult) {
-    try {
-      const { intencao } = analysisResult;
-      
-      console.log('📊 Processando consulta:', intencao);
-      
-      let response;
-      
-      switch (intencao) {
-        case 'abrir_sessao':
-        case 'iniciar_conversa':
-        case 'saudacao':
-          response = '👋 Olá! Sou seu assistente financeiro. Posso ajudar você a:\n\n' +
-                    '💰 Registrar gastos\n' +
-                    '🛒 Registrar produtos\n' +
-                    '📊 Consultar relatórios\n' +
-                    '💳 Ver resumos financeiros\n\n' +
-                    'Como posso ajudar você hoje?';
-          break;
-        case 'consultar_gastos_mes':
-        case 'gastos_mes':
-          response = await this.getMonthlyExpenses(userId);
-          break;
-        case 'consultar_gastos_categoria':
-          response = await this.getCategoryExpenses(userId, analysisResult.categoria);
-          break;
-        case 'consultar_produtos':
-        case 'listar_produtos':
-          response = await this.getUserProducts(userId);
-          break;
-        case 'consultar_saldo':
-        case 'saldo':
-          response = await this.getUserBalance(userId);
-          break;
-        case 'relatorio':
-        case 'resumo':
-          response = await this.getUserSummary(userId);
-          break;
-        case 'consultar_gastos_detalhado':
-          response = await this.processDetailedQuery(userId, analysisResult);
-          break;
-        default:
-          response = '👋 Olá! Sou seu assistente financeiro. Posso ajudar você a:\n\n' +
-                    '💰 Registrar gastos\n' +
-                    '🛒 Registrar produtos\n' +
-                    '📊 Consultar relatórios\n' +
-                    '💳 Ver resumos financeiros\n\n' +
-                    'Como posso ajudar você hoje?';
-      }
-      
-      logger.info('Consulta processada', {
-        userId,
-        queryType: intencao
-      });
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao processar consulta:', error);
-      logger.error('Erro ao processar consulta', {
-        userId,
-        analysisResult,
-        error: error.message
-      });
-      
-      return '❌ Erro ao processar sua consulta. Tente novamente.';
-    }
-  }
-
-  // Processar consulta detalhada
-  async processDetailedQuery(userId, analysisResult) {
-    try {
-      console.log('🔍 Processando consulta detalhada');
-      
-      // Obter transações recentes do usuário
-      const transactions = await databaseService.getUserTransactions(userId, 10);
-      
-      if (transactions.length === 0) {
-        return '📊 Você ainda não possui transações registradas.';
-      }
-      
-      let response = `📊 **Suas últimas transações:**\n\n`;
-      
-      transactions.forEach((transaction, index) => {
-         // Usar o campo correto da data e formatar adequadamente
-          const dateField = transaction.transaction_date || transaction.date || transaction.created_at;
-          const date = moment(dateField).format('DD/MM/YYYY');
-          const value = parseFloat(transaction.value) || 0;
-          const isRevenue = transaction.transaction_type === 'revenue';
-         
-         // Emojis por categoria
-         const categoryEmojis = {
-           'alimentacao': '🍽️',
-           'transporte': '🚗',
-           'lazer': '🎉',
-           'saude': '🏥',
-           'educacao': '📚',
-           'casa': '🏠',
-           'roupas': '👕',
-           'salario': '💼',
-           'freelance': '💻',
-           'vendas': '🛒',
-           'aplicacao': '📈',
-           'outros': '📋'
-         };
-         
-         const categoryEmoji = categoryEmojis[transaction.category] || '📋';
-         const typeEmoji = isRevenue ? '💰' : '💸';
-         const valueColor = isRevenue ? '+' : '-';
-         
-         response += `${typeEmoji} ${categoryEmoji} **${transaction.category.toUpperCase()}**\n`;
-         response += `   💵 ${valueColor}R$ ${value.toFixed(2)}`;
-         response += ` | 📅 ${date}\n`;
-         
-         if (transaction.description && transaction.description.trim()) {
-           response += `   📝 ${transaction.description}\n`;
-         }
-         
-         response += '\n';
-       });
-      
-      // Adicionar resumo
-      const totalExpenses = transactions
-        .filter(t => t.transaction_type === 'expense')
-        .reduce((sum, t) => sum + parseFloat(t.value), 0);
-      
-      const totalRevenues = transactions
-        .filter(t => t.transaction_type === 'revenue')
-        .reduce((sum, t) => sum + parseFloat(t.value), 0);
-      
-      response += `📈 **Resumo das últimas ${transactions.length} transações:**\n`;
-      response += `💸 Gastos: R$ ${totalExpenses.toFixed(2)}\n`;
-      response += `💰 Receitas: R$ ${totalRevenues.toFixed(2)}\n`;
-      response += `📊 Saldo: R$ ${(totalRevenues - totalExpenses).toFixed(2)}`;
-      
-      logger.info('Consulta detalhada processada', {
-        userId,
-        transactionCount: transactions.length
-      });
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao processar consulta detalhada:', error);
-      logger.error('Erro ao processar consulta detalhada', {
-        userId,
-        error: error.message
-      });
-      
-      return '❌ Erro ao processar consulta detalhada. Tente novamente.';
-    }
-  }
-
-  // Processar outras mensagens
-  async processOtherMessage(userId, analysisResult) {
-    try {
-      // Se a confiança for muito baixa, pedir esclarecimento
-      if (analysisResult.confianca < 0.5) {
-        return '🤔 Não consegui entender sua mensagem. Você pode tentar algo como:\n\n' +
-               '• "Gastei 50 reais no supermercado"\n' +
-               '• "Comprei um celular por 800 reais"\n' +
-               '• "Quanto gastei este mês?"\n' +
-               '• "Mostre meus produtos"';
-      }
-      
-      // Tentar processar como gasto genérico se houver valor
-      if (analysisResult.valor > 0) {
-        return await this.processExpenseTransaction(userId, {
-          ...analysisResult,
-          tipo: 'gasto',
-          categoria: 'outros'
-        });
-      }
-      
-      // Resposta padrão
-      return '👋 Olá! Sou seu assistente financeiro. Posso ajudar você a:\n\n' +
-             '💰 Registrar gastos\n' +
-             '🛒 Registrar produtos\n' +
-             '📊 Consultar relatórios\n' +
-             '💳 Ver resumos financeiros\n\n' +
-             'Como posso ajudar você hoje?';
-      
-    } catch (error) {
-      console.error('❌ Erro ao processar mensagem genérica:', error);
-      return '❌ Erro ao processar mensagem. Tente novamente.';
-    }
-  }
-
-  // Obter gastos mensais
-  async getMonthlyExpenses(userId) {
-    try {
-      const currentDate = new Date();
-      const expenses = await databaseService.getUserMonthlyExpenses(
-        userId,
-        currentDate.getFullYear(),
-        currentDate.getMonth() + 1
-      );
-      
-      const total = Object.values(expenses).reduce((sum, value) => {
-        const numValue = parseFloat(value) || 0;
-        return sum + numValue;
-      }, 0);
-      
-      if (total === 0) {
-        return '📊 Você ainda não registrou gastos este mês.';
-      }
-      
-      let response = `📊 **Gastos de ${moment().format('MMMM/YYYY')}**\n\n`;
-      response += `💰 **Total: R$ ${total.toFixed(2)}**\n\n`;
-      
-      const sortedExpenses = Object.entries(expenses)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 5);
-      
-      response += '**Por categoria:**\n';
-      for (const [category, amount] of sortedExpenses) {
-        const numAmount = parseFloat(amount) || 0;
-        const percentage = ((numAmount / total) * 100).toFixed(1);
-        response += `• ${category}: R$ ${numAmount.toFixed(2)} (${percentage}%)\n`;
-      }
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao obter gastos mensais:', error);
-      return '❌ Erro ao consultar gastos mensais.';
-    }
-  }
-
-  // Obter gastos por categoria
-  async getCategoryExpenses(userId, category) {
-    try {
-      const currentDate = new Date();
-      const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-      const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-      
-      const transactions = await databaseService.getUserTransactionsByCategory(
-        userId,
-        category,
-        startOfMonth,
-        endOfMonth
-      );
-      
-      if (transactions.length === 0) {
-        return `📊 Você não tem gastos em ${category} este mês.`;
-      }
-      
-      const total = transactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
-      
-      let response = `📊 **Gastos em ${category} - ${moment().format('MMMM/YYYY')}**\n\n`;
-      response += `💰 **Total: R$ ${total.toFixed(2)}**\n`;
-      response += `📈 **Transações: ${transactions.length}**\n\n`;
-      
-      response += '**Últimas transações:**\n';
-      transactions.slice(0, 5).forEach(t => {
-        const date = moment(t.date).format('DD/MM');
-        response += `• ${date}: R$ ${parseFloat(t.amount).toFixed(2)} - ${t.description || 'Sem descrição'}\n`;
-      });
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao obter gastos por categoria:', error);
-      return '❌ Erro ao consultar gastos por categoria.';
-    }
-  }
-
-  // Obter produtos do usuário
-  async getUserProducts(userId) {
-    try {
-      const products = await databaseService.getUserProducts(userId, 10);
-      
-      if (products.length === 0) {
-        return '🛒 Você ainda não registrou nenhum produto.';
-      }
-      
-      let response = `🛒 **Seus produtos (${products.length} registrados)**\n\n`;
-      
-      products.forEach(product => {
-        const date = moment(product.purchase_date).format('DD/MM/YYYY');
-        response += `• **${product.product_name}**\n`;
-        response += `  💰 R$ ${parseFloat(product.price).toFixed(2)}\n`;
-        response += `  📅 ${date}\n`;
-        if (product.product_category) {
-          response += `  🏷️ ${product.product_category}\n`;
-        }
-        response += '\n';
-      });
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao obter produtos:', error);
-      return '❌ Erro ao consultar produtos.';
-    }
-  }
-
-  // Obter resumo do usuário
-  async getUserSummary(userId) {
-    try {
-      const stats = await userService.getUserStats(userId);
-      
-      let response = `📊 **Resumo Financeiro**\n\n`;
-      response += `💰 **Total gasto:** R$ ${stats.totalSpent.toFixed(2)}\n`;
-      response += `📅 **Este mês:** R$ ${stats.monthlySpent.toFixed(2)}\n`;
-      response += `📈 **Transações:** ${stats.totalTransactions}\n`;
-      response += `🛒 **Produtos:** ${stats.totalProducts}\n\n`;
-      
-      if (stats.topCategories.length > 0) {
-        response += '**Top categorias este mês:**\n';
-        stats.topCategories.forEach(cat => {
-          response += `• ${cat.category}: R$ ${cat.amount.toFixed(2)}\n`;
-        });
-      }
-      
-      return response;
-      
-    } catch (error) {
-      console.error('❌ Erro ao obter resumo:', error);
-      return '❌ Erro ao gerar resumo.';
-    }
-  }
-
-  // Obter estatísticas gerais
-  async getGeneralStats(userId) {
-    try {
-      const stats = await userService.getUserStats(userId);
-      
-      // Garantir que os valores são números válidos
-      const totalTransactions = stats.totalTransactions || 0;
-      const totalSpent = parseFloat(stats.totalSpent) || 0;
-      const monthlySpent = parseFloat(stats.monthlySpent) || 0;
-      
-      return `📊 Você tem ${totalTransactions} transações registradas, ` +
-             `totalizando R$ ${totalSpent.toFixed(2)}. ` +
-             `Este mês você gastou R$ ${monthlySpent.toFixed(2)}.`;
-      
-    } catch (error) {
-      console.error('❌ Erro ao obter estatísticas:', error);
-      return '❌ Erro ao consultar estatísticas.';
-    }
-  }
-
-  // Parsear data
-  parseDate(dateString) {
-    const today = new Date();
     
-    switch (dateString.toLowerCase()) {
-      case 'hoje':
-        return today;
-      case 'ontem':
-        return new Date(today.getTime() - 24 * 60 * 60 * 1000);
-      case 'anteontem':
-        return new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000);
-      default:
-        // Tentar parsear data específica
-        const parsed = moment(dateString, ['DD/MM/YYYY', 'DD/MM', 'YYYY-MM-DD'], true);
-        return parsed.isValid() ? parsed.toDate() : today;
+    const history = this.conversationHistory.get(phoneNumber);
+    history.push({
+      message,
+      sender,
+      timestamp: new Date(),
+      analysis: null
+    });
+    
+    // Manter apenas as últimas mensagens
+    if (history.length > this.maxHistorySize) {
+      history.shift();
     }
   }
 
-  // Verificar se está pronto
+  /**
+   * Analisar contexto da conversa
+   * @param {string} phoneNumber - Número do WhatsApp
+   * @param {string} currentMessage - Mensagem atual
+   * @returns {Object} - Análise do contexto
+   */
+  analyzeConversationContext(phoneNumber, currentMessage) {
+    const history = this.conversationHistory.get(phoneNumber) || [];
+    
+    if (history.length === 0) {
+      return { isContextual: false };
+    }
+    
+    // Implementar lógica de análise contextual aqui
+    // Por enquanto, retornar não contextual
+    return { isContextual: false };
+  }
+
+  /**
+   * Processar mensagem contextual
+   * @param {string} message - Mensagem atual
+   * @param {Object} context - Contexto da conversa
+   * @param {string} userId - ID do usuário
+   * @returns {Promise<Object>} - Resultado da análise
+   */
+  async processContextualMessage(message, context, userId) {
+    // Implementar processamento contextual aqui
+    // Por enquanto, usar processamento normal
+    const userContext = await this.getUserContext(userId);
+    return await geminiService.processFinancialMessage(message, userContext);
+  }
+
+  /**
+   * Verificar se o agente está pronto
+   * @returns {boolean} - Status de prontidão
+   */
   isReady() {
     return this.isInitialized && 
            databaseService.isConnected && 
-           geminiService.isReady();
+           geminiService.isReady() &&
+           Object.values(this.handlers).every(handler => handler !== null);
   }
 
-  // Obter status
+  /**
+   * Obter status do agente
+   * @returns {Object} - Status detalhado
+   */
   getStatus() {
     return {
       isInitialized: this.isInitialized,
       database: databaseService.isConnected,
       gemini: geminiService.isReady(),
       whatsapp: whatsappService.getStatus(),
-      processingQueue: this.processingQueue.size
+      processingQueue: this.processingQueue.size,
+      handlers: {
+        expense: this.handlers.expense !== null,
+        income: this.handlers.income !== null,
+        investment: this.handlers.investment !== null,
+        query: this.handlers.query !== null
+      }
     };
   }
 }

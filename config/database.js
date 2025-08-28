@@ -363,68 +363,250 @@ class DatabaseService {
     }
   }
 
-  // Receitas
-  async createRevenue(userId, value, category, description = null, transactionDate = null, source = 'other') {
+  // Método unificado para transações
+  async createTransaction(userId, type, amount, category, description = null, transactionDate = null, subcategory = null, paymentMethod = null) {
     const date = transactionDate || new Date();
+    
+    // Converter tipo português para inglês
+    const typeMapping = {
+      'despesa': 'expense',
+      'receita': 'revenue',
+      'gasto': 'expense',
+      'ganho': 'revenue'
+    };
+    
+    const dbType = typeMapping[type] || type;
     
     if (this.connectionType === 'supabase') {
       const { data, error } = await this.supabase
-        .from('revenues')
+        .from('transactions')
         .insert({
           user_id: userId,
-          amount: value,
+          type: dbType,
+          amount: amount,
           category: category,
+          subcategory: subcategory,
           description: description,
           date: date.toISOString(),
-          source: source
+          transaction_date: date.toISOString(),
+          payment_method: paymentMethod,
+          status: 'completed',
+          value: amount,
+          // Campos para compras parceladas (existem na tabela)
+          is_installment: false,
+          installment_info: null
         })
         .select()
         .single();
       
       if (error) throw error;
+      
+      // Também inserir na tabela específica para compatibilidade
+      if (dbType === 'expense') {
+        await this.supabase
+          .from('expenses')
+          .insert({
+            user_id: userId,
+            amount: amount,
+            category: category,
+            description: description,
+            date: date.toISOString(),
+            type: subcategory || 'other'
+          });
+      } else if (dbType === 'revenue') {
+        await this.supabase
+          .from('revenues')
+          .insert({
+            user_id: userId,
+            amount: amount,
+            category: category,
+            description: description,
+            date: date.toISOString(),
+            source: 'other'
+          });
+      }
+      
       return data;
     } else {
       const result = await this.query(
-        'INSERT INTO revenues (user_id, amount, category, description, date, source) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [userId, value, category, description, date, source]
+        'INSERT INTO transactions (user_id, type, amount, category, subcategory, description, date, transaction_date, payment_method, status, value) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+        [userId, dbType, amount, category, subcategory, description, date, date, paymentMethod, 'completed', amount]
       );
+      
+      // Também inserir na tabela específica para compatibilidade
+      if (dbType === 'expense') {
+        await this.query(
+          'INSERT INTO expenses (user_id, amount, category, description, date, type) VALUES ($1, $2, $3, $4, $5, $6)',
+          [userId, amount, category, description, date, subcategory || 'other']
+        );
+      } else if (dbType === 'revenue') {
+        await this.query(
+          'INSERT INTO revenues (user_id, amount, category, description, date, source) VALUES ($1, $2, $3, $4, $5, $6)',
+          [userId, amount, category, description, date, 'other']
+        );
+      }
+      
       return result.rows[0];
     }
   }
 
-  // Transações
+  // Receitas (mantido para compatibilidade)
+  async createRevenue(userId, value, category, description = null, transactionDate = null, source = 'other') {
+    return this.createTransaction(userId, 'revenue', value, category, description, transactionDate);
+  }
+
+  // Despesas (mantido para compatibilidade)
   async createExpense(userId, value, category, description = null, transactionDate = null, type = 'other') {
+    return this.createTransaction(userId, 'expense', value, category, description, transactionDate, type);
+  }
+
+  // Método específico para compras parceladas
+  async createInstallmentTransaction(userId, installmentData) {
+    const {
+      totalAmount,
+      totalInstallments,
+      currentInstallment = 1,
+      installmentAmount,
+      category,
+      description,
+      transactionDate,
+      paymentMethod
+    } = installmentData;
+    
     const date = transactionDate || new Date();
+    const remainingAmount = totalAmount - (installmentAmount * currentInstallment);
+    
+    // Calcular próxima data de vencimento (30 dias)
+    const nextDueDate = new Date(date);
+    nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+    
+    // Criar objeto com informações do parcelamento
+    const installmentInfo = {
+      totalAmount: totalAmount,
+      totalInstallments: totalInstallments,
+      currentInstallment: currentInstallment,
+      installmentAmount: installmentAmount,
+      remainingAmount: remainingAmount,
+      nextDueDate: nextDueDate.toISOString()
+    };
     
     if (this.connectionType === 'supabase') {
       const { data, error } = await this.supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          type: 'expense',
+          amount: installmentAmount, // Valor da parcela atual
+          category: category,
+          description: description,
+          date: date.toISOString(),
+          payment_method: paymentMethod,
+          status: 'completed',
+          value: installmentAmount,
+          // Campos específicos para parcelamento
+          is_installment: true,
+          installment_info: installmentInfo
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      // Também inserir na tabela específica para compatibilidade
+      await this.supabase
         .from('expenses')
         .insert({
           user_id: userId,
-          amount: value,
+          amount: installmentAmount,
           category: category,
           description: description,
           date: date.toISOString(),
-          type: type
-        })
-        .select()
-        .single();
+          type: 'installment'
+        });
+      
+      return data;
+    }
+  }
+
+
+
+  // Obter histórico de transações
+  async getTransactionHistory(userId, limit = 10) {
+    if (this.connectionType === 'supabase') {
+      const { data, error } = await this.supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('date', { ascending: false })
+        .limit(limit);
       
       if (error) throw error;
       return data;
     } else {
       const result = await this.query(
-        'INSERT INTO expenses (user_id, amount, category, description, date, type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [userId, value, category, description, date, type]
+        'SELECT * FROM transactions WHERE user_id = $1 ORDER BY date DESC LIMIT $2',
+        [userId, limit]
       );
-      return result.rows[0];
+      return result.rows;
     }
   }
 
-  // Manter método antigo para compatibilidade
-  async createTransaction(userId, value, category, description = null, transactionDate = null, type = 'other') {
-    return this.createExpense(userId, value, category, description, transactionDate, type);
+  // Obter saldo atual
+  async getCurrentBalance(userId) {
+    if (this.connectionType === 'supabase') {
+      const { data, error } = await this.supabase
+        .from('transactions')
+        .select('amount, type')
+        .eq('user_id', userId);
+      
+      if (error) throw error;
+      
+      const balance = data.reduce((acc, t) => {
+        const amount = parseFloat(t.amount) || 0;
+        return t.type === 'revenue' ? acc + amount : acc - amount;
+      }, 0);
+      
+      return balance;
+    } else {
+      const result = await this.query(
+        'SELECT amount, type FROM transactions WHERE user_id = $1',
+        [userId]
+      );
+      
+      const balance = result.rows.reduce((acc, t) => {
+        const amount = parseFloat(t.amount) || 0;
+        return t.type === 'revenue' ? acc + amount : acc - amount;
+      }, 0);
+      
+      return balance;
+    }
   }
+
+  // Obter transações por tipo
+  async getTransactionsByType(userId, type, limit = 10) {
+    const dbType = type === 'despesa' ? 'expense' : type === 'receita' ? 'revenue' : type;
+    
+    if (this.connectionType === 'supabase') {
+      const { data, error } = await this.supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('type', dbType)
+        .order('date', { ascending: false })
+        .limit(limit);
+      
+      if (error) throw error;
+      return data;
+    } else {
+      const result = await this.query(
+        'SELECT * FROM transactions WHERE user_id = $1 AND type = $2 ORDER BY date DESC LIMIT $3',
+        [userId, dbType, limit]
+      );
+      return result.rows;
+    }
+  }
+
+
 
   async getUserTransactions(userId, limit = 50, offset = 0) {
     if (this.connectionType === 'supabase') {
