@@ -292,19 +292,30 @@ class WhatsAppService {
 
   // Processar mensagem recebida
   async handleIncomingMessage(message) {
+    // Log básico para debug
+    console.log('🔍 DEBUG: Mensagem capturada:', {
+      from: message.from,
+      body: message.body,
+      type: message.type,
+      isStatus: message.isStatus,
+      fromMe: message.fromMe
+    });
+    
     // Ignorar mensagens de status e grupos por enquanto
     if (message.isStatus || message.from.includes('@g.us')) {
+      console.log('⏭️ Ignorando mensagem de status ou grupo');
       return;
     }
     
     // Ignorar mensagens próprias
     if (message.fromMe) {
+      console.log('⏭️ Ignorando mensagem própria');
       return;
     }
     
-    // Verificar se é mensagem de áudio
-    if (message.hasMedia && message.type === 'audio') {
-      console.log(`🎙️ Áudio recebido de ${message.from}`);
+    // Verificar se é mensagem de áudio (incluindo PTT do WhatsApp)
+    if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
+      console.log(`🎙️ Áudio recebido de ${message.from} (tipo: ${message.type})`);
       logger.info('Áudio recebido', {
         from: message.from,
         type: message.type,
@@ -415,16 +426,24 @@ class WhatsAppService {
 
   // Enviar mensagem
   async sendMessage(to, message) {
+    console.log(`🔍 DEBUG: Tentando enviar mensagem para ${to}`);
+    console.log(`🔍 DEBUG: isReady = ${this.isReady}, client = ${!!this.client}`);
+    
     if (!this.isReady || !this.client) {
+      console.log('❌ DEBUG: Cliente não está pronto ou não existe');
       throw new Error('WhatsApp Client não está pronto');
     }
     
     try {
-      await this.client.sendMessage(to, message);
+      console.log(`🔍 DEBUG: Chamando client.sendMessage(${to}, mensagem)`);
+      const result = await this.client.sendMessage(to, message);
+      console.log(`✅ DEBUG: Resultado do envio:`, result);
       console.log(`📤 Mensagem enviada para ${to}: ${message}`);
       logger.info('Mensagem enviada', { to, message });
+      return result;
     } catch (error) {
       console.error('❌ Erro ao enviar mensagem:', error);
+      console.error('❌ DEBUG: Stack trace completo:', error.stack);
       logger.error('Erro ao enviar mensagem', { to, message, error: error.message });
       throw error;
     }

@@ -196,6 +196,27 @@ class DatabaseService {
     }
   }
 
+  // Atualizar número do WhatsApp do usuário
+  async updateUserWhatsApp(userId, whatsappNumber) {
+    if (this.connectionType === 'supabase') {
+      const { data, error } = await this.supabase
+        .from('users')
+        .update({ whatsapp_number: whatsappNumber })
+        .eq('id', userId)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } else {
+      const result = await this.query(
+        'UPDATE users SET whatsapp_number = $1 WHERE id = $2 RETURNING *',
+        [whatsappNumber, userId]
+      );
+      return result.rows[0];
+    }
+  }
+
   // =====================================
   // SESSÕES DE USUÁRIO (WhatsApp Auth)
   // =====================================
@@ -250,6 +271,26 @@ class DatabaseService {
       
       if (error) throw error;
       return data;
+    }
+  }
+
+  // Deletar sessão de usuário
+  async deleteUserSession(phoneNumber) {
+    if (this.connectionType === 'supabase') {
+      const { data, error } = await this.supabase
+        .from('user_sessions')
+        .delete()
+        .eq('phone_number', phoneNumber)
+        .select();
+      
+      if (error) throw error;
+      return data;
+    } else {
+      const result = await this.query(
+        'DELETE FROM user_sessions WHERE phone_number = $1 RETURNING *',
+        [phoneNumber]
+      );
+      return result.rows;
     }
   }
 

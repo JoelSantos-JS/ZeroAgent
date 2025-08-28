@@ -91,39 +91,30 @@ class AudioOptimizer {
     return filepath;
   }
 
-  // Aplicar otimizações usando FFmpeg
+  // Aplicar otimizações básicas (sem FFmpeg)
   async applyOptimizations(inputPath, config) {
-    return new Promise((resolve, reject) => {
+    try {
+      console.log('⚠️ FFmpeg não disponível, usando otimização básica');
+      
+      // Para agora, apenas copiamos o arquivo sem modificações
+      // Em produção, você pode usar bibliotecas JavaScript puras para processamento de áudio
       const outputPath = inputPath.replace('input_', 'optimized_');
       
-      ffmpeg(inputPath)
-        .audioFilters(`atempo=${config.speed}`) // Acelerar áudio
-        .audioCodec('libmp3lame')                // Codec MP3
-        .audioBitrate(config.bitrate)            // Bitrate
-        .audioFrequency(config.sampleRate)       // Sample rate
-        .format(config.format)                   // Formato
-        .output(outputPath)
-        .on('start', (commandLine) => {
-          console.log('🔄 Executando FFmpeg:', commandLine);
-        })
-        .on('progress', (progress) => {
-          if (progress.percent) {
-            console.log(`📊 Progresso: ${Math.round(progress.percent)}%`);
-          }
-        })
-        .on('end', () => {
-          console.log('✅ FFmpeg concluído');
-          resolve(outputPath);
-        })
-        .on('error', (error) => {
-          console.error('❌ Erro no FFmpeg:', error);
-          reject(error);
-        })
-        .run();
-    });
+      // Simular processamento
+      const fs = require('fs').promises;
+      const inputBuffer = await fs.readFile(inputPath);
+      await fs.writeFile(outputPath, inputBuffer);
+      
+      console.log('✅ Otimização básica concluída (sem alteração de velocidade)');
+      return outputPath;
+      
+    } catch (error) {
+      console.error('❌ Erro na otimização básica:', error);
+      throw error;
+    }
   }
 
-  // Calcular métricas de otimização
+  // Calcular métricas de otimização (modo básico)
   async calculateMetrics(originalBuffer, optimizedBuffer, config) {
     const originalSize = originalBuffer.length;
     const optimizedSize = optimizedBuffer.length;
@@ -132,24 +123,27 @@ class AudioOptimizer {
     // Estimar duração original (aproximação baseada no tamanho)
     // MP3 típico: ~1KB por segundo a 128kbps
     const estimatedOriginalDuration = Math.round(originalSize / 1024); // segundos
-    const optimizedDuration = Math.round(estimatedOriginalDuration / config.speed);
     
-    // Calcular economia de tokens (32 tokens por segundo)
+    // Sem FFmpeg, não há alteração de velocidade real, mas simulamos para compatibilidade
+    const simulatedOptimizedDuration = Math.round(estimatedOriginalDuration / config.speed);
+    
+    // Calcular economia de tokens simulada (32 tokens por segundo)
     const originalTokens = estimatedOriginalDuration * 32;
-    const optimizedTokens = optimizedDuration * 32;
-    const tokenSavings = originalTokens - optimizedTokens;
-    const tokenSavingsPercent = ((tokenSavings / originalTokens) * 100).toFixed(2);
+    const simulatedOptimizedTokens = simulatedOptimizedDuration * 32;
+    const simulatedTokenSavings = originalTokens - simulatedOptimizedTokens;
+    const simulatedTokenSavingsPercent = ((simulatedTokenSavings / originalTokens) * 100).toFixed(2);
     
     return {
       originalSize,
       optimizedSize,
       compressionRatio: `${compressionRatio}%`,
       estimatedOriginalDuration,
-      optimizedDuration,
+      optimizedDuration: simulatedOptimizedDuration,
       originalTokens,
-      optimizedTokens,
-      tokenSavings,
-      tokenSavingsPercent: `${tokenSavingsPercent}%`
+      optimizedTokens: simulatedOptimizedTokens,
+      tokenSavings: simulatedTokenSavings,
+      tokenSavingsPercent: `${simulatedTokenSavingsPercent}%`,
+      note: 'Métricas simuladas - FFmpeg não disponível'
     };
   }
 

@@ -375,7 +375,29 @@ class FinancialAgent {
       try {
         console.log(`🔍 Verificando autenticação para: ${phoneNumber}`);
         
-        // Verificar se existe sessão ativa
+        // PRIMEIRO: Verificar se usuário já existe pelo WhatsApp
+        const existingUser = await databaseService.getUserByWhatsApp(phoneNumber);
+        if (existingUser) {
+          console.log(`👤 Usuário existente encontrado: ${existingUser.name}`);
+          
+          // Limpar sessões antigas primeiro
+          try {
+            await databaseService.deleteUserSession(phoneNumber);
+          } catch (cleanupError) {
+            console.log('🧹 Limpeza de sessão (normal se não existir)');
+          }
+          
+          // Criar nova sessão para usuário existente
+          await databaseService.createUserSession(phoneNumber, existingUser.id);
+          
+          return {
+            isAuthenticated: true,
+            user: existingUser,
+            step: null
+          };
+        }
+        
+        // Verificar se existe sessão ativa (só para usuários novos)
         const session = await databaseService.getUserSession(phoneNumber);
         console.log(`📋 Sessão encontrada:`, session);
         
@@ -390,33 +412,33 @@ class FinancialAgent {
           };
         }
       
-      // Verificar se está no processo de autenticação
-      const authProcess = await databaseService.getAuthProcess(phoneNumber);
-      
-      if (authProcess) {
+        // Verificar se está no processo de autenticação
+        const authProcess = await databaseService.getAuthProcess(phoneNumber);
+        
+        if (authProcess) {
+          return {
+            isAuthenticated: false,
+            user: null,
+            step: authProcess.step
+          };
+        }
+        
+        // Novo usuário - iniciar processo de autenticação
         return {
           isAuthenticated: false,
           user: null,
-          step: authProcess.step
+          step: 'welcome'
+        };
+        
+      } catch (error) {
+        console.error('❌ Erro ao verificar autenticação:', error);
+        return {
+          isAuthenticated: false,
+          user: null,
+          step: 'welcome'
         };
       }
-      
-      // Novo usuário - iniciar processo de autenticação
-      return {
-        isAuthenticated: false,
-        user: null,
-        step: 'welcome'
-      };
-      
-    } catch (error) {
-      console.error('❌ Erro ao verificar autenticação:', error);
-      return {
-        isAuthenticated: false,
-        user: null,
-        step: 'welcome'
-      };
     }
-  }
 
   // Gerenciar fluxo de autenticação
   async handleAuthenticationFlow(phoneNumber, message, step) {
@@ -451,27 +473,58 @@ class FinancialAgent {
           const userEmail = authProcess.data.email;
           const password = message.trim();
           
-          // Autenticar com Firebase
-          const authResult = await userService.authenticateUser(userEmail, password);
-          
-          if (authResult.success) {
-            // Criar sessão
-            await databaseService.createUserSession(phoneNumber, authResult.user.id);
-            await databaseService.deleteAuthProcess(phoneNumber);
+          try {
+            // Tentar autenticar com Firebase
+            const authResult = await userService.authenticateUser(userEmail, password);
             
-            return `🎉 **Autenticação realizada com sucesso!**\n\n` +
-                   `👋 Olá, **${authResult.user.name}**! Seja bem-vindo(a)!\n\n` +
-                   `🤖 **Agora estou pronto para te ajudar!** Você pode:\n\n` +
-                   `💰 *"Gastei 50 reais no supermercado"*\n` +
-                   `💵 *"Recebi 1000 reais de salário"*\n` +
-                   `📊 *"Quanto gastei este mês?"*\n` +
-                   `🛒 *"Comprei um notebook por 2000 reais"*\n` +
-                   `📈 *"Investi 500 reais na poupança"*\n\n` +
-                   `✨ **Como posso te ajudar hoje?**`;
-          } else {
-             // Falha na autenticação
-             await databaseService.updateAuthProcess(phoneNumber, 'email');
-             return '❌ **Email ou senha incorretos.**\n\n🔄 Vamos tentar novamente!\n\n📧 **Digite seu email:**';
+            if (authResult.success) {
+              // Criar sessão
+              await databaseService.createUserSession(phoneNumber, authResult.user.id);
+              await databaseService.deleteAuthProcess(phoneNumber);
+              
+              return `🎉 **Autenticação realizada com sucesso!**\n\n` +
+                     `👋 Olá, **${authResult.user.name}**! Seja bem-vindo(a)!\n\n` +
+                     `🤖 **Agora estou pronto para te ajudar!** Você pode:\n\n` +
+                     `💰 *"Gastei 50 reais no supermercado"*\n` +
+                     `💵 *"Recebi 1000 reais de salário"*\n` +
+                     `📊 *"Quanto gastei este mês?"*\n` +
+                     `🛒 *"Comprei um notebook por 2000 reais"*\n` +
+                     `📈 *"Investi 500 reais na poupança"*\n\n` +
+                     `✨ **Como posso te ajudar hoje?**`;
+            } else {
+               // Falha na autenticação
+               await databaseService.updateAuthProcess(phoneNumber, 'email');
+               return '❌ **Email ou senha incorretos.**\n\n🔄 Vamos tentar novamente!\n\n📧 **Digite seu email:**';
+            }
+          } catch (error) {
+            console.error('❌ Erro no fluxo de autenticação:', error);
+            
+            // Se erro de constraint (usuário já existe), tentar recuperar sessão
+            if (error.code === '23505' && error.message.includes('phone_number')) {
+              try {
+                // Buscar usuário existente por email
+                 const existingUser = await databaseService.getUserByEmail(userEmail);
+                if (existingUser) {
+                  // Atualizar número do WhatsApp do usuário existente
+                  await databaseService.updateUserWhatsApp(existingUser.id, phoneNumber);
+                  // Criar nova sessão
+                  await databaseService.createUserSession(phoneNumber, existingUser.id);
+                  await databaseService.deleteAuthProcess(phoneNumber);
+                  
+                  return `🎉 **Bem-vindo de volta!**\n\n` +
+                         `👋 Olá, **${existingUser.name}**!\n\n` +
+                         `🤖 **Estou pronto para te ajudar!** Como posso ajudar você hoje?`;
+                }
+              } catch (recoveryError) {
+                console.error('❌ Erro na recuperação de sessão:', recoveryError);
+              }
+            }
+            
+            // Reiniciar fluxo em caso de erro
+            await databaseService.deleteAuthProcess(phoneNumber);
+            return '⚠️ **Ops! Algo deu errado.**\n\n🔄 Vamos recomeçar!\n\n' +
+                   '👋 Olá! Bem-vindo ao **Financial Agent**! 🤖💰\n\n' +
+                   '📧 **Digite seu email para começar:**';
           }
         
         default:
@@ -556,29 +609,8 @@ class FinancialAgent {
       
       const mensagemInicial = mensagensCategoria[categoria] || mensagensCategoria['outros'];
       
-      let response = `${mensagemInicial}\n\n`;
-      response += `💰 **R$ ${valor.toFixed(2)}** em ${categoriaFormatada}\n`;
-      
-      // Adicionar contexto do orçamento se disponível
-       if (userContext.monthlySpent !== undefined && userContext.monthlySpent !== null) {
-         const monthlySpent = parseFloat(userContext.monthlySpent) || 0;
-         const novoTotal = monthlySpent + valor;
-         response += `📊 Total do mês: R$ ${novoTotal.toFixed(2)}\n\n`;
-       }
-      
-      // Dica personalizada e mais humana
-      const dicasPersonalizadas = {
-        'alimentacao': 'Que tal planejar as refeições da semana? Ajuda a economizar! 🥗',
-        'transporte': 'Considere alternativas como transporte público ou carona! 🚌',
-        'supermercado': 'Fazer lista de compras evita gastos desnecessários! 📝',
-        'lazer': 'Diversão é importante, mas sempre dentro do orçamento! 🎯',
-        'saude': 'Investir em prevenção pode economizar muito no futuro! 💪',
-        'casa': 'Manter a casa organizada ajuda a controlar os gastos! 🧹',
-        'roupas': 'Antes de comprar, veja se realmente precisa! 👀'
-      };
-      
-      const dicaFinal = dica || dicasPersonalizadas[categoria] || 'Continue registrando seus gastos para ter controle total das finanças! 📈';
-      response += `💡 ${dicaFinal}`;
+      let response = `${mensagemInicial}\n`;
+      response += `💰 **R$ ${valor.toFixed(2)}** em ${categoriaFormatada}`;
       
       logger.info(`${tipo} registrada`, {
         userId,
@@ -640,21 +672,8 @@ class FinancialAgent {
       
       const mensagemInicial = mensagensCategoria[categoria] || mensagensCategoria['outros'];
       
-      let response = `${mensagemInicial}\n\n`;
-      response += `💰 **R$ ${valor.toFixed(2)}** em ${categoriaFormatada}\n`;
-      
-      // Dicas personalizadas para receitas
-      const dicasPersonalizadas = {
-        'salario': 'Que tal separar uma parte para investimentos? 💡',
-        'freelance': 'Considere guardar 20% para impostos! 📊',
-        'vendas': 'Ótimo! Continue focando nas vendas! 🚀',
-        'bonus': 'Uma boa oportunidade para investir ou quitar dívidas! 💪',
-        'investimento': 'Seus investimentos estão dando retorno! Continue assim! 📈',
-        'jogos': 'Lembre-se: jogos devem ser diversão, não investimento! Jogue com responsabilidade! ⚠️'
-      };
-      
-      const dicaFinal = dica || dicasPersonalizadas[categoria] || 'Continue registrando suas receitas para ter controle total das finanças! 📈';
-      response += `💡 ${dicaFinal}`;
+      let response = `${mensagemInicial}\n`;
+      response += `💰 **R$ ${valor.toFixed(2)}** em ${categoriaFormatada}`;
       
       logger.info('Receita registrada', {
         userId,
@@ -746,6 +765,16 @@ class FinancialAgent {
       let response;
       
       switch (intencao) {
+        case 'abrir_sessao':
+        case 'iniciar_conversa':
+        case 'saudacao':
+          response = '👋 Olá! Sou seu assistente financeiro. Posso ajudar você a:\n\n' +
+                    '💰 Registrar gastos\n' +
+                    '🛒 Registrar produtos\n' +
+                    '📊 Consultar relatórios\n' +
+                    '💳 Ver resumos financeiros\n\n' +
+                    'Como posso ajudar você hoje?';
+          break;
         case 'consultar_gastos_mes':
         case 'gastos_mes':
           response = await this.getMonthlyExpenses(userId);
@@ -765,8 +794,16 @@ class FinancialAgent {
         case 'resumo':
           response = await this.getUserSummary(userId);
           break;
+        case 'consultar_gastos_detalhado':
+          response = await this.processDetailedQuery(userId, analysisResult);
+          break;
         default:
-          response = await this.getGeneralStats(userId);
+          response = '👋 Olá! Sou seu assistente financeiro. Posso ajudar você a:\n\n' +
+                    '💰 Registrar gastos\n' +
+                    '🛒 Registrar produtos\n' +
+                    '📊 Consultar relatórios\n' +
+                    '💳 Ver resumos financeiros\n\n' +
+                    'Como posso ajudar você hoje?';
       }
       
       logger.info('Consulta processada', {
@@ -803,9 +840,11 @@ class FinancialAgent {
       let response = `📊 **Suas últimas transações:**\n\n`;
       
       transactions.forEach((transaction, index) => {
-         const date = moment(transaction.transaction_date).format('DD/MM/YYYY HH:mm');
-         const value = parseFloat(transaction.value);
-         const isRevenue = transaction.transaction_type === 'revenue';
+         // Usar o campo correto da data e formatar adequadamente
+          const dateField = transaction.transaction_date || transaction.date || transaction.created_at;
+          const date = moment(dateField).format('DD/MM/YYYY');
+          const value = parseFloat(transaction.value) || 0;
+          const isRevenue = transaction.transaction_type === 'revenue';
          
          // Emojis por categoria
          const categoryEmojis = {
@@ -915,7 +954,10 @@ class FinancialAgent {
         currentDate.getMonth() + 1
       );
       
-      const total = Object.values(expenses).reduce((sum, value) => sum + value, 0);
+      const total = Object.values(expenses).reduce((sum, value) => {
+        const numValue = parseFloat(value) || 0;
+        return sum + numValue;
+      }, 0);
       
       if (total === 0) {
         return '📊 Você ainda não registrou gastos este mês.';
@@ -930,8 +972,9 @@ class FinancialAgent {
       
       response += '**Por categoria:**\n';
       for (const [category, amount] of sortedExpenses) {
-        const percentage = ((amount / total) * 100).toFixed(1);
-        response += `• ${category}: R$ ${amount.toFixed(2)} (${percentage}%)\n`;
+        const numAmount = parseFloat(amount) || 0;
+        const percentage = ((numAmount / total) * 100).toFixed(1);
+        response += `• ${category}: R$ ${numAmount.toFixed(2)} (${percentage}%)\n`;
       }
       
       return response;
@@ -1041,9 +1084,14 @@ class FinancialAgent {
     try {
       const stats = await userService.getUserStats(userId);
       
-      return `📊 Você tem ${stats.totalTransactions} transações registradas, ` +
-             `totalizando R$ ${stats.totalSpent.toFixed(2)}. ` +
-             `Este mês você gastou R$ ${stats.monthlySpent.toFixed(2)}.`;
+      // Garantir que os valores são números válidos
+      const totalTransactions = stats.totalTransactions || 0;
+      const totalSpent = parseFloat(stats.totalSpent) || 0;
+      const monthlySpent = parseFloat(stats.monthlySpent) || 0;
+      
+      return `📊 Você tem ${totalTransactions} transações registradas, ` +
+             `totalizando R$ ${totalSpent.toFixed(2)}. ` +
+             `Este mês você gastou R$ ${monthlySpent.toFixed(2)}.`;
       
     } catch (error) {
       console.error('❌ Erro ao obter estatísticas:', error);

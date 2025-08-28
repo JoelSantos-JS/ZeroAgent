@@ -17,6 +17,29 @@ class GeminiService {
       this.apiKeys.push(process.env.GEMINI_API_KEY);
     }
     
+    // Configurações de áudio
+    this.audioConfig = {
+      supportedFormats: {
+        'audio/mp3': { extension: 'mp3', maxSize: 40 * 1024 * 1024 },
+        'audio/wav': { extension: 'wav', maxSize: 40 * 1024 * 1024 },
+        'audio/flac': { extension: 'flac', maxSize: 40 * 1024 * 1024 },
+        'audio/ogg': { extension: 'ogg', maxSize: 40 * 1024 * 1024 },
+        'audio/m4a': { extension: 'm4a', maxSize: 40 * 1024 * 1024 }
+      },
+      limits: {
+        maxFileSize: 40 * 1024 * 1024, // 40MB
+        maxDuration: 9.5 * 60 * 60,    // 9.5 horas em segundos
+        tokensPerSecond: 32,           // 32 tokens por segundo
+        maxTotalDuration: 9.5 * 60 * 60 // Duração máxima total por prompt
+      },
+      optimization: {
+        recommendedSpeed: 1.5,         // Velocidade recomendada para economia
+        recommendedBitrate: '128k',    // Bitrate recomendado
+        recommendedSampleRate: 16000,  // Sample rate para voz
+        recommendedFormat: 'mp3'       // Formato recomendado
+      }
+    };
+    
     if (this.apiKeys.length === 0) {
       console.warn('⚠️ GEMINI_API_KEY não encontrada nas variáveis de ambiente');
     }
@@ -667,8 +690,99 @@ Use emojis apropriados e mantenha um tom amigável.
   getStatus() {
     return {
       isInitialized: this.isInitialized,
-      hasApiKey: !!this.apiKey,
-      modelReady: !!this.model
+      offlineMode: this.offlineMode,
+      hasApiKey: this.apiKeys.length > 0,
+      currentKeyIndex: this.currentKeyIndex,
+      audioConfig: this.audioConfig
+    };
+  }
+
+  // Validar formato de áudio
+  validateAudioFormat(mimeType) {
+    return this.audioConfig.supportedFormats.hasOwnProperty(mimeType);
+  }
+
+  // Validar tamanho de arquivo de áudio
+  validateAudioSize(fileSize, mimeType = null) {
+    const maxSize = mimeType && this.audioConfig.supportedFormats[mimeType] 
+      ? this.audioConfig.supportedFormats[mimeType].maxSize 
+      : this.audioConfig.limits.maxFileSize;
+    
+    return fileSize <= maxSize;
+  }
+
+  // Calcular tokens estimados para áudio
+  calculateAudioTokens(durationInSeconds) {
+    return Math.ceil(durationInSeconds * this.audioConfig.limits.tokensPerSecond);
+  }
+
+  // Estimar custo de processamento de áudio
+  estimateAudioCost(durationInSeconds, model = 'flash') {
+    const tokens = this.calculateAudioTokens(durationInSeconds);
+    
+    // Custos por 1M tokens (em USD)
+    const costs = {
+      'flash': 0.30,      // Gemini 2.5 Flash para áudio
+      'pro': 1.00         // Gemini 2.5 Pro para áudio
+    };
+    
+    const costPerToken = (costs[model] || costs.flash) / 1000000;
+    return {
+      tokens,
+      estimatedCost: (tokens * costPerToken).toFixed(6),
+      costInUSD: `$${(tokens * costPerToken).toFixed(6)}`
+    };
+  }
+
+  // Obter configurações de otimização recomendadas
+  getOptimizationConfig(preset = 'balanced') {
+    const presets = {
+      aggressive: {
+        speed: 1.8,
+        bitrate: '96k',
+        sampleRate: 16000,
+        format: 'mp3'
+      },
+      balanced: {
+        speed: this.audioConfig.optimization.recommendedSpeed,
+        bitrate: this.audioConfig.optimization.recommendedBitrate,
+        sampleRate: this.audioConfig.optimization.recommendedSampleRate,
+        format: this.audioConfig.optimization.recommendedFormat
+      },
+      conservative: {
+        speed: 1.2,
+        bitrate: '192k',
+        sampleRate: 22050,
+        format: 'mp3'
+      },
+      quality: {
+        speed: 1.0,
+        bitrate: '256k',
+        sampleRate: 44100,
+        format: 'flac'
+      }
+    };
+    
+    return presets[preset] || presets.balanced;
+  }
+
+  // Validar duração total de áudio
+  validateTotalDuration(durationInSeconds) {
+    return durationInSeconds <= this.audioConfig.limits.maxTotalDuration;
+  }
+
+  // Obter informações sobre formato de áudio
+  getAudioFormatInfo(mimeType) {
+    return this.audioConfig.supportedFormats[mimeType] || null;
+  }
+
+  // Gerar relatório de configuração de áudio
+  getAudioConfigReport() {
+    return {
+      supportedFormats: Object.keys(this.audioConfig.supportedFormats),
+      limits: this.audioConfig.limits,
+      optimization: this.audioConfig.optimization,
+      presets: ['aggressive', 'balanced', 'conservative', 'quality']
     };
   }
 }
