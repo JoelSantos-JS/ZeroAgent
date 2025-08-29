@@ -218,7 +218,7 @@ class AudioProcessor {
   // Construir prompt especializado para análise financeira de áudio
   buildFinancialAudioPrompt(messageContext = {}) {
     return `
-Você é um assistente financeiro especializado em processar áudios sobre transações financeiras.
+Você é o Zero, um assistente financeiro especializado em processar áudios sobre transações financeiras.
 
 Sua tarefa é:
 1. TRANSCREVER o áudio completamente

@@ -249,6 +249,18 @@ class WhatsAppService {
     this.client.on('authenticated', async () => {
       console.log('🔐 Cliente autenticado');
       await this.updateConnectionStatus('authenticated');
+      
+      // Debug: Aguardar evento 'ready'
+      console.log('⏳ Aguardando evento \'ready\' do WhatsApp...');
+      
+      // Timeout para detectar se 'ready' não dispara
+      setTimeout(() => {
+        if (!this.isReady) {
+          console.log('⚠️ AVISO: Evento \'ready\' não disparou em 30 segundos!');
+          console.log('🔍 Status atual: authenticated mas não ready');
+          console.log('💡 Possível problema: Sessão incompleta ou incompatibilidade');
+        }
+      }, 30000);
     });
     
     // Cliente pronto
@@ -257,11 +269,22 @@ class WhatsAppService {
       this.isReady = true;
       await this.updateConnectionStatus('ready');
       
-      // Obter informações do cliente
-      const info = this.client.info;
-      console.log(`📱 Conectado como: ${info.pushname} (${info.wid.user})`);
-      
-      logger.info('WhatsApp Client conectado e pronto para receber mensagens');
+      try {
+        // Obter informações do cliente
+        const info = this.client.info;
+        console.log(`📱 Conectado como: ${info.pushname} (${info.wid.user})`);
+        console.log('🎉 SUCESSO: Evento \'ready\' disparou corretamente!');
+        console.log('🔗 WhatsApp totalmente operacional para receber mensagens');
+        
+        logger.info('WhatsApp Client conectado e pronto para receber mensagens', {
+          pushname: info.pushname,
+          user: info.wid.user,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('❌ Erro ao obter informações do cliente:', error);
+        console.log('⚠️ Cliente pronto mas sem informações completas');
+      }
     });
     
     // Mensagem recebida
@@ -347,7 +370,7 @@ class WhatsAppService {
       }
     } else {
       // Resposta padrão se não há processador configurado
-      await this.sendMessage(message.from, '🤖 Olá! Sou seu assistente financeiro. Envie uma mensagem como "Gastei 50 reais no supermercado" para registrar uma transação.');
+      await this.sendMessage(message.from, '🤖 Olá! Eu sou o **Zero**, seu assistente financeiro. Envie uma mensagem como "Gastei 50 reais no supermercado" para registrar uma transação.');
     }
   }
 

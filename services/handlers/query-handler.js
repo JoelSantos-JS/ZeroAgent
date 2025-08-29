@@ -26,7 +26,7 @@ class QueryHandler extends BaseHandler {
         case 'abrir_sessao':
         case 'iniciar_conversa':
         case 'saudacao':
-          return this.handleWelcomeMessage(userId);
+          return await this.handleWelcomeMessage(userId);
           
         case 'consultar_gastos_mes':
         case 'gastos_mes':
@@ -60,6 +60,10 @@ class QueryHandler extends BaseHandler {
           return await this.getBudgetStatus(userId);
           
         default:
+          // Se for uma saudação simples, tratar como boas-vindas
+          if (this.isSimpleGreeting(analysisResult)) {
+            return await this.handleWelcomeMessage(userId);
+          }
           return await this.handleGenericQuery(userId, analysisResult);
       }
       
@@ -67,6 +71,91 @@ class QueryHandler extends BaseHandler {
       console.error('❌ Erro ao processar consulta:', error);
       return '❌ Erro ao processar sua consulta. Tente novamente.';
     }
+  }
+
+  /**
+   * Verificar se é uma saudação simples
+   * @param {Object} analysisResult - Resultado da análise
+   * @returns {boolean} - True se for saudação simples
+   */
+  isSimpleGreeting(analysisResult) {
+    const { descricao, intencao, valor } = analysisResult;
+    
+    // Lista abrangente de saudações em português, inglês e variações
+    const greetingWords = [
+      // Saudações básicas em português
+      'ola', 'olá', 'oi', 'oie', 'oii', 'oiii',
+      'eae', 'eai', 'e ae', 'e ai', 'salve', 'fala',
+      'fala ae', 'fala ai', 'beleza', 'blz',
+      
+      // Saudações por período do dia
+      'bom dia', 'bomdia', 'bd', 'bdia',
+      'boa tarde', 'boatarde', 'bt', 'btarde',
+      'boa noite', 'boanoite', 'bn', 'bnoite',
+      'boa madrugada', 'boamadrugada',
+      
+      // Saudações em inglês
+      'hello', 'hi', 'hey', 'hii', 'hiii',
+      'good morning', 'morning', 'gm',
+      'good afternoon', 'afternoon',
+      'good evening', 'evening',
+      'good night', 'goodnight', 'gn',
+      
+      // Saudações informais e gírias
+      'sup', 'whats up', 'wassup', 'yo',
+      'howdy', 'hola', 'ciao', 'tchau',
+      'xau', 'xauu', 'bye', 'adeus',
+      
+      // Variações com cumprimentos
+      'tudo bem', 'tudo bom', 'como vai',
+      'como você está', 'como esta',
+      'como vc está', 'como vc esta',
+      'tudo joia', 'tudo certo', 'suave',
+      
+      // Saudações regionais brasileiras
+      'opa', 'opaa', 'opaaaa', 'ae', 'aee',
+      'coé', 'coe', 'qual é', 'qual eh',
+      'firmeza', 'tranquilo', 'de boa',
+      
+      // Expressões de início de conversa
+      'alo', 'alô', 'pronto', 'tem alguém',
+      'tem alguem', 'alguém aí', 'alguem ai',
+      'você está aí', 'voce esta ai',
+      
+      // Saudações com emoji ou símbolos (texto)
+      'oi :)', 'ola :)', 'hey :)', 'hi :)',
+      'oi!', 'ola!', 'hey!', 'hi!',
+      
+      // Variações com typos comuns
+      'oii', 'oiii', 'hii', 'hiii',
+      'heey', 'heeey', 'olaaa', 'olaaaa'
+    ];
+    
+    // Verificar se é saudação pela intenção
+    const isGreetingIntent = [
+      'saudação', 'saudacao', 'cumprimento',
+      'iniciar_conversa', 'abrir_sessao',
+      'greeting', 'hello', 'hi'
+    ].includes(intencao);
+    
+    // Verificar se é saudação pela descrição (texto exato ou contém)
+    const text = descricao?.toLowerCase().trim() || '';
+    const isGreetingText = greetingWords.some(word => {
+      // Verificar se é exatamente a palavra ou se contém a palavra
+      return text === word || text.includes(word);
+    });
+    
+    // Verificar se é uma saudação muito curta (1-3 caracteres)
+    const isVeryShortGreeting = text.length <= 3 && [
+      'oi', 'hi', 'yo', 'ae', 'ei', 'ey', 'hey'
+    ].includes(text);
+    
+    // É saudação se não tem valor financeiro E é uma das condições acima
+    return (valor === 0 || !valor) && (
+      isGreetingIntent || 
+      isGreetingText || 
+      isVeryShortGreeting
+    );
   }
 
   /**

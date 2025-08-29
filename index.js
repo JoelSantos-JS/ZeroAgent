@@ -397,7 +397,7 @@ async function startApplication() {
     whatsappService.setMessageProcessor(financialAgent);
     
     // Iniciar servidor
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, async () => {
       console.log(`🌐 Servidor rodando na porta ${PORT}`);
       console.log(`📱 Acesse: http://localhost:${PORT}`);
       console.log(`🔐 Autenticação Firebase habilitada`);
@@ -407,6 +407,26 @@ async function startApplication() {
         timestamp: new Date().toISOString(),
         auth: 'Firebase enabled'
       });
+      
+      // Inicializar WhatsApp automaticamente após servidor estar pronto
+      try {
+        console.log('📱 Inicializando WhatsApp automaticamente...');
+        await whatsappService.initialize();
+        console.log('✅ WhatsApp inicializado automaticamente!');
+        
+        logger.info('WhatsApp inicializado automaticamente', {
+          timestamp: new Date().toISOString(),
+          status: 'success'
+        });
+      } catch (error) {
+        console.log('⚠️ WhatsApp não pôde ser inicializado automaticamente:', error.message);
+        console.log('💡 Use a API /api/whatsapp/initialize para conectar manualmente');
+        
+        logger.warn('Falha na inicialização automática do WhatsApp', {
+          error: error.message,
+          timestamp: new Date().toISOString()
+        });
+      }
     });
     
     // Graceful shutdown

@@ -10,6 +10,8 @@ const ExpenseHandler = require('./handlers/expense-handler');
 const IncomeHandler = require('./handlers/income-handler');
 const InvestmentHandler = require('./handlers/investment-handler');
 const QueryHandler = require('./handlers/query-handler');
+const CorrectionHandler = require('./handlers/correction-handler');
+const SalesHandler = require('./handlers/sales-handler');
 
 // Importar utilitários
 const DataParser = require('./parsers/data-parser');
@@ -33,7 +35,8 @@ class FinancialAgent {
       expense: null,
       income: null,
       investment: null,
-      query: null
+      query: null,
+      correction: null
     };
   }
 
@@ -50,10 +53,18 @@ class FinancialAgent {
       await this.audioProcessor.initialize();
       
       // Inicializar handlers especializados
-      this.handlers.expense = new ExpenseHandler(databaseService, userService);
+      this.handlers.correction = new CorrectionHandler(databaseService, userService);
+      this.handlers.sales = new SalesHandler(databaseService, userService);
+      this.handlers.expense = new ExpenseHandler(databaseService, userService, this.handlers.correction);
       this.handlers.income = new IncomeHandler(databaseService, userService);
       this.handlers.investment = new InvestmentHandler(databaseService, userService);
       this.handlers.query = new QueryHandler(databaseService, userService);
+      
+      // Conectar correction handler com outros handlers
+      this.handlers.expense.setCorrectionHandler(this.handlers.correction);
+      
+      // Inicializar SalesHandler (sincronização automática)
+      await this.handlers.sales.initialize();
       
       // Configurar processador de mensagens no WhatsApp Service
       whatsappService.setMessageProcessor(this);
@@ -181,6 +192,18 @@ class FinancialAgent {
    */
   async routeToHandler(userId, analysisResult) {
     try {
+      // Verificar primeiro se é uma correção (prioridade alta)
+      const correctionResult = await this.handlers.correction.process(userId, analysisResult);
+      if (correctionResult !== null) {
+        return correctionResult;
+      }
+      
+      // Verificar se é comando relacionado a vendas
+      const salesResult = await this.handlers.sales.process(userId, analysisResult);
+      if (salesResult !== null) {
+        return salesResult;
+      }
+      
       const { tipo } = analysisResult;
       
       switch (tipo) {
@@ -196,6 +219,9 @@ class FinancialAgent {
           
         case 'consulta':
           return await this.handlers.query.process(userId, analysisResult);
+          
+        case 'correcao':
+          return await this.handlers.correction.process(userId, analysisResult);
           
         default:
           return await this.handleOtherMessage(userId, analysisResult);
@@ -341,8 +367,8 @@ class FinancialAgent {
       switch (step) {
         case 'welcome':
           await databaseService.createAuthProcess(phoneNumber, 'email', {});
-          return '👋 Olá! Bem-vindo ao **Financial Agent**! 🤖💰\n\n' +
-                 '📧 **Digite seu email para começar:**';
+          return '👋 Olá! Bem-vindo ao **Zero**! 🤖💰\n\n' +
+                  '📧 **Digite seu email para começar:**';
         
         case 'email':
           const email = message.trim();
@@ -408,7 +434,7 @@ class FinancialAgent {
             // Reiniciar fluxo em caso de erro
             await databaseService.deleteAuthProcess(phoneNumber);
             return '⚠️ **Ops! Algo deu errado.**\n\n🔄 Vamos recomeçar!\n\n' +
-                   '👋 Olá! Bem-vindo ao **Financial Agent**! 🤖💰\n\n' +
+                   '👋 Olá! Bem-vindo ao **Zero**! 🤖💰\n\n' +
                    '📧 **Digite seu email para começar:**';
           }
         
@@ -421,8 +447,8 @@ class FinancialAgent {
       console.error('❌ Erro no fluxo de autenticação:', error);
       await databaseService.deleteAuthProcess(phoneNumber);
       return '⚠️ **Ops! Algo deu errado.**\n\n🔄 Vamos recomeçar!\n\n' +
-             '👋 Olá! Bem-vindo ao **Financial Agent**! 🤖💰\n\n' +
-             '📧 **Digite seu email para começar:**';
+              '👋 Olá! Bem-vindo ao **Zero**! 🤖💰\n\n' +
+              '📧 **Digite seu email para começar:**';
     }
   }
 
@@ -547,7 +573,9 @@ class FinancialAgent {
         expense: this.handlers.expense !== null,
         income: this.handlers.income !== null,
         investment: this.handlers.investment !== null,
-        query: this.handlers.query !== null
+        query: this.handlers.query !== null,
+        correction: this.handlers.correction !== null,
+        sales: this.handlers.sales !== null
       }
     };
   }

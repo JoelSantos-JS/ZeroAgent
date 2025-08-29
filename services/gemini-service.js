@@ -607,7 +607,7 @@ Responda APENAS com um JSON válido no seguinte formato:
       `Total na categoria ${transactionData.categoria}: R$ ${userHistory.categoryTotal}` : '';
     
     return `
-Você é um assistente financeiro amigável e prestativo. Gere uma resposta personalizada para o usuário baseada na transação registrada.
+Você é o Zero, um assistente financeiro amigável e prestativo. Gere uma resposta personalizada para o usuário baseada na transação registrada.
 
 Dados da transação:
 - Tipo: ${transactionData.tipo}
@@ -671,7 +671,7 @@ Gere uma resposta personalizada:
   // Construir prompt para consultas
   buildQueryPrompt(queryType, params) {
     return `
-Você é um assistente financeiro. O usuário fez uma consulta sobre suas finanças.
+Você é o Zero, um assistente financeiro. O usuário fez uma consulta sobre suas finanças.
 
 Tipo de consulta: ${queryType}
 Parâmetros: ${JSON.stringify(params)}

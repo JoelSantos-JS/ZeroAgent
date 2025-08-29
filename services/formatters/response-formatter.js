@@ -12,10 +12,19 @@ class ResponseFormatter {
    * @returns {string} - Resposta formatada
    */
   static formatExpenseResponse(transaction, analysisResult, isInstallment = false) {
-    const { valor, categoria } = analysisResult;
+    const { valor, categoria, descricao, confianca } = analysisResult;
     const categoriaFormatada = this.formatCategory(categoria);
     
-    // Mensagens personalizadas por categoria
+    // Verificar se a categoria foi inferida automaticamente (baixa confiança ou descrição genérica)
+    const isGenericDescription = descricao && (
+      descricao.toLowerCase().includes('compra') ||
+      descricao.toLowerCase().includes('gastei') ||
+      descricao.toLowerCase().includes('paguei')
+    ) && !descricao.toLowerCase().includes(categoria.toLowerCase());
+    
+    const isLowConfidenceCategory = confianca < 0.8 || isGenericDescription;
+    
+    // Mensagens personalizadas por categoria (apenas quando há certeza)
     const mensagensCategoria = {
       'alimentacao': 'Anotei seu gasto com alimentação! 🍽️',
       'transporte': 'Registrei sua despesa de transporte! 🚗',
@@ -30,19 +39,44 @@ class ResponseFormatter {
       'outros': 'Despesa registrada com sucesso! ✅'
     };
     
-    const mensagemInicial = mensagensCategoria[categoria] || mensagensCategoria['outros'];
+    // Usar mensagem neutra se a categoria foi inferida automaticamente
+    const mensagemInicial = isLowConfidenceCategory ? 
+      'Despesa registrada com sucesso! ✅' : 
+      (mensagensCategoria[categoria] || mensagensCategoria['outros']);
+    
+    let response;
     
     if (isInstallment && transaction.is_installment && transaction.installment_info) {
       // Resposta específica para parcelamento
       const info = transaction.installment_info;
-      return `${mensagemInicial} 💳\n` +
-             `💰 **Parcela ${info.currentInstallment}/${info.totalInstallments}**: R$ ${info.installmentAmount.toFixed(2)}\n` +
-             `📊 **Total**: R$ ${info.totalAmount.toFixed(2)} em ${categoriaFormatada}`;
+      response = `${mensagemInicial} 💳\n` +
+                `💰 **Parcela ${info.currentInstallment}/${info.totalInstallments}**: R$ ${info.installmentAmount.toFixed(2)}\n` +
+                `📊 **Total**: R$ ${info.totalAmount.toFixed(2)}`;
+      
+      // Adicionar categoria apenas se tiver certeza
+      if (!isLowConfidenceCategory) {
+        response += ` em ${categoriaFormatada}`;
+      }
     } else {
       // Resposta normal
-      return `${mensagemInicial}\n` +
-             `💰 **R$ ${valor.toFixed(2)}** em ${categoriaFormatada}`;
+      response = `${mensagemInicial}\n` +
+                `💰 **R$ ${valor.toFixed(2)}`;
+      
+      // Adicionar categoria apenas se tiver certeza
+      if (!isLowConfidenceCategory) {
+        response += `** em ${categoriaFormatada}`;
+      } else {
+        response += `**`;
+      }
     }
+    
+    // Se a categoria foi inferida, perguntar para confirmar
+    if (isLowConfidenceCategory) {
+      response += `\n\n🤔 **Classifiquei como "${categoriaFormatada}". Está correto?**\n`;
+      response += `💡 *Se não, me diga o que foi comprado para ajustar a categoria.*`;
+    }
+    
+    return response;
   }
 
   /**
@@ -236,12 +270,22 @@ class ResponseFormatter {
     const greeting = userName ? `Olá, **${userName}**!` : 'Olá!';
     
     return `👋 ${greeting}\n\n` +
-           `🤖 Sou seu assistente financeiro. Posso ajudar você a:\n\n` +
-           `💰 Registrar gastos\n` +
-           `💵 Registrar receitas\n` +
-           `📈 Registrar investimentos\n` +
-           `📊 Consultar relatórios\n` +
-           `💳 Ver resumos financeiros\n\n` +
+           `🤖 Eu sou o **Zero**, seu assistente financeiro e de vendas. Posso ajudar você a:\n\n` +
+           `💰 **Finanças Pessoais:**\n` +
+           `• Registrar gastos\n` +
+           `• Registrar receitas\n` +
+           `• Registrar investimentos\n` +
+           `• Ver resumos financeiros\n\n` +
+           `🛒 **Gestão de Vendas:**\n` +
+           `• Registrar vendas\n` +
+           `• Consultar estoque\n` +
+           `• Relatórios de vendas\n` +
+           `• Analytics de produtos\n\n` +
+           `📊 **Relatórios:**\n` +
+           `• Resumo financeiro\n` +
+           `• Performance de vendas\n` +
+           `• Top produtos\n` +
+           `• Alertas de estoque\n\n` +
            `Como posso ajudar você hoje?`;
   }
 

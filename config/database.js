@@ -606,6 +606,296 @@ class DatabaseService {
     }
   }
 
+  // =====================================================
+  // MÉTODOS PARA INTEGRAÇÃO DE VENDAS
+  // =====================================================
+
+  // Buscar vendas novas desde última sincronização
+  async getNewSales(userId, lastSyncTime) {
+    try {
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .rpc('get_new_sales', {
+            p_user_id: userId,
+            p_last_sync: lastSyncTime.toISOString()
+          });
+        
+        if (error) throw error;
+        return data || [];
+      } else {
+        const result = await this.query(`
+          SELECT 
+            s.id as sale_id,
+            s.product_id,
+            s.user_id,
+            s.quantity,
+            s.unit_price,
+            s.total_amount,
+            s.cost_price,
+            s.profit,
+            s.margin_percent,
+            s.buyer_name,
+            s.buyer_email,
+            s.sale_date,
+            p.name as product_name,
+            p.category as product_category,
+            s.created_at
+          FROM sales s
+          LEFT JOIN products p ON s.product_id = p.id
+          WHERE s.user_id = $1
+          AND s.created_at > $2
+          ORDER BY s.created_at ASC
+        `, [userId, lastSyncTime]);
+        
+        return result.rows || [];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao buscar vendas novas:', error);
+      throw error;
+    }
+  }
+
+  // Atualizar status de sincronização
+  async updateSyncStatus(userId, syncType, recordsProcessed = 0, status = 'success', errorMessage = null) {
+    try {
+      const syncData = {
+        user_id: userId,
+        sync_type: syncType,
+        last_sync_time: new Date().toISOString(),
+        records_processed: recordsProcessed,
+        status: status,
+        error_message: errorMessage
+      };
+
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .from('sync_status')
+          .upsert(syncData, {
+            onConflict: 'user_id,sync_type'
+          })
+          .select()
+          .single();
+        
+        if (error) throw error;
+        return data;
+      } else {
+        const result = await this.query(`
+          INSERT INTO sync_status (user_id, sync_type, last_sync_time, records_processed, status, error_message)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (user_id, sync_type)
+          DO UPDATE SET
+            last_sync_time = EXCLUDED.last_sync_time,
+            records_processed = EXCLUDED.records_processed,
+            status = EXCLUDED.status,
+            error_message = EXCLUDED.error_message,
+            updated_at = NOW()
+          RETURNING *
+        `, [userId, syncType, syncData.last_sync_time, recordsProcessed, status, errorMessage]);
+        
+        return result.rows[0];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao atualizar status de sincronização:', error);
+      throw error;
+    }
+  }
+
+  // Obter último status de sincronização
+  async getLastSyncStatus(userId, syncType) {
+    try {
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .from('sync_status')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('sync_type', syncType)
+          .single();
+        
+        if (error && error.code !== 'PGRST116') throw error; // PGRST116 = not found
+        return data;
+      } else {
+        const result = await this.query(
+          'SELECT * FROM sync_status WHERE user_id = $1 AND sync_type = $2',
+          [userId, syncType]
+        );
+        
+        return result.rows[0] || null;
+      }
+    } catch (error) {
+      console.error('❌ Erro ao obter status de sincronização:', error);
+      return null;
+    }
+  }
+
+  // Obter métricas de vendas
+  async getSalesMetrics(userId, startDate = null, endDate = null) {
+    try {
+      let dateFilter = '';
+      let params = [userId];
+      
+      if (startDate && endDate) {
+        dateFilter = 'AND metric_date BETWEEN $2 AND $3';
+        params.push(startDate, endDate);
+      } else if (startDate) {
+        dateFilter = 'AND metric_date >= $2';
+        params.push(startDate);
+      }
+
+      if (this.connectionType === 'supabase') {
+        let query = this.supabase
+          .from('sales_metrics')
+          .select(`
+            *,
+            products:product_id(name, category)
+          `)
+          .eq('user_id', userId);
+        
+        if (startDate) query = query.gte('metric_date', startDate);
+        if (endDate) query = query.lte('metric_date', endDate);
+        
+        const { data, error } = await query.order('metric_date', { ascending: false });
+        
+        if (error) throw error;
+        return data || [];
+      } else {
+        const result = await this.query(`
+          SELECT 
+            sm.*,
+            p.name as product_name,
+            p.category as product_category
+          FROM sales_metrics sm
+          LEFT JOIN products p ON sm.product_id = p.id
+          WHERE sm.user_id = $1 ${dateFilter}
+          ORDER BY sm.metric_date DESC
+        `, params);
+        
+        return result.rows || [];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao obter métricas de vendas:', error);
+      throw error;
+    }
+  }
+
+  // Obter produtos com baixo estoque
+  async getLowStockProducts(userId) {
+    try {
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .from('low_stock_products')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('needs_reorder', true);
+        
+        if (error) throw error;
+        return data || [];
+      } else {
+        const result = await this.query(`
+          SELECT * FROM low_stock_products 
+          WHERE user_id = $1 AND needs_reorder = true
+        `, [userId]);
+        
+        return result.rows || [];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao obter produtos com baixo estoque:', error);
+      throw error;
+    }
+  }
+
+  // Obter top produtos
+  async getTopProducts(userId, limit = 10) {
+    try {
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .from('top_products')
+          .select('*')
+          .eq('user_id', userId)
+          .order('total_revenue', { ascending: false })
+          .limit(limit);
+        
+        if (error) throw error;
+        return data || [];
+      } else {
+        const result = await this.query(`
+          SELECT * FROM top_products 
+          WHERE user_id = $1 
+          ORDER BY total_revenue DESC 
+          LIMIT $2
+        `, [userId, limit]);
+        
+        return result.rows || [];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao obter top produtos:', error);
+      throw error;
+    }
+  }
+
+  // Obter dashboard de vendas
+  async getSalesDashboard(userId, days = 30) {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .from('sales_dashboard')
+          .select('*')
+          .eq('user_id', userId)
+          .gte('sale_date', startDate.toISOString().split('T')[0])
+          .order('sale_date', { ascending: false });
+        
+        if (error) throw error;
+        return data || [];
+      } else {
+        const result = await this.query(`
+          SELECT * FROM sales_dashboard 
+          WHERE user_id = $1 
+          AND sale_date >= $2
+          ORDER BY sale_date DESC
+        `, [userId, startDate.toISOString().split('T')[0]]);
+        
+        return result.rows || [];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao obter dashboard de vendas:', error);
+      throw error;
+    }
+  }
+
+  // Atualizar métricas de vendas
+  async updateSalesMetrics(userId, date = null) {
+    try {
+      const targetDate = date || new Date().toISOString().split('T')[0];
+
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .rpc('update_sales_metrics', {
+            p_user_id: userId,
+            p_date: targetDate
+          });
+        
+        if (error) throw error;
+        return data;
+      } else {
+        const result = await this.query(
+          'SELECT update_sales_metrics($1, $2)',
+          [userId, targetDate]
+        );
+        
+        return result.rows[0];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao atualizar métricas de vendas:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // FIM DOS MÉTODOS DE INTEGRAÇÃO DE VENDAS
+  // =====================================================
+
 
 
   async getUserTransactions(userId, limit = 50, offset = 0) {
@@ -653,6 +943,40 @@ class DatabaseService {
         [userId, limit, offset]
       );
       return result.rows;
+    }
+  }
+
+  // Atualizar transação existente
+  async updateTransaction(transactionId, updates) {
+    try {
+      if (this.connectionType === 'supabase') {
+        const { data, error } = await this.supabase
+          .from('transactions')
+          .update(updates)
+          .eq('id', transactionId)
+          .select()
+          .single();
+        
+        if (error) throw error;
+        return data;
+      } else {
+        // Construir query de update dinamicamente
+        const setClause = Object.keys(updates)
+          .map((key, index) => `${key} = $${index + 2}`)
+          .join(', ');
+        
+        const values = [transactionId, ...Object.values(updates)];
+        
+        const result = await this.query(
+          `UPDATE transactions SET ${setClause}, updated_at = NOW() WHERE id = $1 RETURNING *`,
+          values
+        );
+        
+        return result.rows[0];
+      }
+    } catch (error) {
+      console.error('❌ Erro ao atualizar transação:', error);
+      throw error;
     }
   }
 

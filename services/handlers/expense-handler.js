@@ -8,8 +8,37 @@ const ResponseFormatter = require('../formatters/response-formatter');
  * Herda funcionalidades comuns do BaseHandler
  */
 class ExpenseHandler extends BaseHandler {
-  constructor(databaseService, userService) {
+  constructor(databaseService, userService, correctionHandler = null) {
     super(databaseService, userService);
+    this.correctionHandler = correctionHandler;
+  }
+  
+  /**
+   * Definir handler de correções
+   * @param {CorrectionHandler} correctionHandler - Handler de correções
+   */
+  setCorrectionHandler(correctionHandler) {
+    this.correctionHandler = correctionHandler;
+  }
+  
+  /**
+   * Verificar se deve registrar correção pendente
+   * @param {Object} analysisResult - Resultado da análise
+   * @returns {boolean} - True se deve registrar correção
+   */
+  shouldRegisterCorrection(analysisResult) {
+    const { categoria, descricao, confianca } = analysisResult;
+    
+    // Verificar se a categoria foi inferida automaticamente (baixa confiança ou descrição genérica)
+    const isGenericDescription = descricao && (
+      descricao.toLowerCase().includes('compra') ||
+      descricao.toLowerCase().includes('gastei') ||
+      descricao.toLowerCase().includes('paguei')
+    ) && !descricao.toLowerCase().includes(categoria.toLowerCase());
+    
+    const isLowConfidenceCategory = confianca < 0.8 || isGenericDescription;
+    
+    return isLowConfidenceCategory;
   }
 
   /**
@@ -50,7 +79,23 @@ class ExpenseHandler extends BaseHandler {
       this.logTransaction('Despesa', userId, transaction, analysisResult);
       
       // Formatar resposta
-      return ResponseFormatter.formatExpenseResponse(transaction, analysisResult, isInstallment);
+      const response = ResponseFormatter.formatExpenseResponse(
+        transaction, 
+        analysisResult, 
+        isInstallment
+      );
+      
+      // Se categoria foi inferida e há handler de correções, registrar correção pendente
+      if (this.correctionHandler && this.shouldRegisterCorrection(analysisResult)) {
+        this.correctionHandler.setPendingCorrection(userId, {
+          id: transaction.id,
+          valor: analysisResult.valor,
+          categoria: analysisResult.categoria,
+          descricao: analysisResult.descricao
+        }, 'categoria');
+      }
+      
+      return response;
       
     } catch (error) {
       return this.handleError(error, userId, analysisResult, 'despesa');

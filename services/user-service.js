@@ -236,18 +236,21 @@ class UserService {
         recentTransactions: []
       };
       
-      // Total de transações e gastos
+      // Total de transações e gastos (usando tabela transactions unificada)
       if (databaseService.connectionType === 'supabase') {
-        // Transações totais (usando tabela expenses)
-        const { data: expenses, error: expensesError } = await databaseService.supabase
-          .from('expenses')
-          .select('amount, category')
+        // Todas as transações
+        const { data: transactions, error: transError } = await databaseService.supabase
+          .from('transactions')
+          .select('amount, category, type')
           .eq('user_id', userId);
         
-        if (expensesError) throw expensesError;
+        if (transError) throw transError;
         
-        stats.totalTransactions = expenses.length;
-        stats.totalSpent = expenses.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+        stats.totalTransactions = transactions.length;
+        
+        // Calcular gastos (despesas são valores positivos na tabela, mas representam saídas)
+        const expenses = transactions.filter(t => t.type === 'expense');
+        stats.totalSpent = expenses.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
         
         // Produtos totais
         const { data: products, error: prodError } = await databaseService.supabase
@@ -260,14 +263,14 @@ class UserService {
         stats.totalProducts = products.length;
         
       } else {
-        // PostgreSQL (usando tabela expenses)
-        const expensesResult = await databaseService.query(
-          'SELECT COUNT(*) as count, SUM(amount) as total FROM expenses WHERE user_id = $1',
+        // PostgreSQL (usando tabela transactions)
+        const transResult = await databaseService.query(
+          'SELECT COUNT(*) as count, SUM(CASE WHEN type = \'expense\' THEN ABS(amount) ELSE 0 END) as total FROM transactions WHERE user_id = $1',
           [userId]
         );
         
-        stats.totalTransactions = parseInt(expensesResult.rows[0].count);
-        stats.totalSpent = parseFloat(expensesResult.rows[0].total) || 0;
+        stats.totalTransactions = parseInt(transResult.rows[0].count);
+        stats.totalSpent = parseFloat(transResult.rows[0].total) || 0;
         
         const prodResult = await databaseService.query(
           'SELECT COUNT(*) as count FROM products WHERE user_id = $1',
@@ -294,8 +297,8 @@ class UserService {
         .slice(0, 5)
         .map(([category, amount]) => ({ category, amount }));
       
-      // Transações recentes (usando expenses)
-      stats.recentTransactions = await databaseService.getUserExpenses(userId, 5);
+      // Transações recentes (usando transactions)
+      stats.recentTransactions = await databaseService.getUserTransactions(userId, 5);
       
       return stats;
       
