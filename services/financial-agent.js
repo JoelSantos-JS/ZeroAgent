@@ -97,10 +97,11 @@ class FinancialAgent {
     this.processingQueue.set(messageId, Date.now());
     
     try {
-      console.log('📨 Mensagem recebida de', message.from + ':', message.body);
+      // Log sanitizado para não expor senhas
+      const sanitizedBody = this.sanitizeLogMessage(message.from, message.body);
       logger.info('Mensagem recebida', {
         from: message.from,
-        body: message.body
+        body: sanitizedBody
       });
       
       // Adicionar ao histórico de conversação
@@ -319,7 +320,7 @@ class FinancialAgent {
       const session = await databaseService.getUserSession(phoneNumber);
       
       if (session && session.user_id) {
-        const user = await databaseService.getUserById(session.user_id);
+        const user = await userService.getUserById(session.user_id);
         if (user) {
           return {
             isAuthenticated: true,
@@ -397,18 +398,43 @@ class FinancialAgent {
           }
           
           try {
-            // Criar usuário
-            const user = await databaseService.createUser(userEmail, password, phoneNumber);
+            // CORREÇÃO: Verificar se já existe usuário com este email
+            let user = await databaseService.getUserByEmail(userEmail);
             
-            // Criar sessão
-            await databaseService.createUserSession(phoneNumber, user.id);
-            
-            // Limpar processo de autenticação
-            await databaseService.deleteAuthProcess(phoneNumber);
-            
-            return `🎉 **Conta criada com sucesso!**\n\n` +
-                   `👋 Bem-vindo, **${user.name || user.email}**!\n\n` +
-                   ResponseFormatter.formatWelcomeMessage(user.name);
+            if (user) {
+              // Usuário já existe, apenas vincular WhatsApp
+              console.log(`👤 Usuário existente encontrado: ${user.email} (ID: ${user.id})`);
+              
+              // Atualizar número do WhatsApp se necessário
+              if (user.whatsapp_number !== phoneNumber) {
+                await databaseService.updateUserWhatsApp(user.id, phoneNumber);
+                console.log(`📱 WhatsApp vinculado ao usuário existente: ${phoneNumber}`);
+              }
+              
+              // Criar sessão
+              await databaseService.createUserSession(phoneNumber, user.id);
+              
+              // Limpar processo de autenticação
+              await databaseService.deleteAuthProcess(phoneNumber);
+              
+              return `🎉 **Bem-vindo de volta!**\n\n` +
+                     `👋 Olá, **${user.name || user.email}**!\n\n` +
+                     `🤖 **Estou pronto para te ajudar!** Como posso ajudar você hoje?`;
+            } else {
+              // Criar novo usuário com parâmetros corretos: (whatsappNumber, name, firebaseUid, email)
+              user = await databaseService.createUser(phoneNumber, userEmail.split('@')[0], null, userEmail);
+              console.log(`👤 Novo usuário criado: ${user.email} (ID: ${user.id})`);
+              
+              // Criar sessão
+              await databaseService.createUserSession(phoneNumber, user.id);
+              
+              // Limpar processo de autenticação
+              await databaseService.deleteAuthProcess(phoneNumber);
+              
+              return `🎉 **Conta criada com sucesso!**\n\n` +
+                     `👋 Bem-vindo, **${user.name || user.email}**!\n\n` +
+                     ResponseFormatter.formatWelcomeMessage(user.name);
+            }
             
           } catch (error) {
             console.error('❌ Erro no fluxo de autenticação:', error);
@@ -545,6 +571,37 @@ class FinancialAgent {
     // Por enquanto, usar processamento normal
     const userContext = await this.getUserContext(userId);
     return await geminiService.processFinancialMessage(message, userContext);
+  }
+
+  /**
+   * Sanitizar mensagem para logs (proteger senhas)
+   * @param {string} phoneNumber - Número do telefone
+   * @param {string} message - Mensagem original
+   * @returns {string} - Mensagem sanitizada
+   */
+  sanitizeLogMessage(phoneNumber, message) {
+    try {
+      // Verificar se usuário está no processo de autenticação
+      const authProcess = this.authProcesses?.get?.(phoneNumber);
+      
+      // Se está no passo de senha, não logar a mensagem completa
+      if (authProcess && authProcess.step === 'password') {
+        return '[SENHA PROTEGIDA]';
+      }
+      
+      // Verificar se a mensagem parece ser uma senha (6+ caracteres, sem espaços)
+      if (message && message.length >= 6 && message.length <= 50 && !message.includes(' ')) {
+        // Verificar se não é um email ou transação comum
+        if (!message.includes('@') && !message.toLowerCase().includes('real') && 
+            !message.toLowerCase().includes('gastei') && !message.toLowerCase().includes('recebi')) {
+          return '[POSSÍVEL SENHA PROTEGIDA]';
+        }
+      }
+      
+      return message;
+    } catch (error) {
+      return '[ERRO NA SANITIZAÇÃO]';
+    }
   }
 
   /**

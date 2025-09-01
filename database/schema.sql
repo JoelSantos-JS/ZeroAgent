@@ -4,7 +4,7 @@
 -- Tabela de usuários
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
-    whatsapp_number VARCHAR(20) UNIQUE NOT NULL,
+    whatsapp_number VARCHAR(50) UNIQUE NOT NULL,  -- Aumentado de 20 para 50 para comportar números completos
     name VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),

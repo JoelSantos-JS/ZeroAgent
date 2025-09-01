@@ -48,6 +48,7 @@ class WhatsAppService {
     this.connectionStatus = 'disconnected';
     this.eventHandlers = new Map();
     this.isInitializing = false;
+    this.readyTimeout = null;
     this.autoInitialized = false;
     this.messageProcessor = null;
     
@@ -175,7 +176,7 @@ class WhatsAppService {
       const { WhatsAppClient, fs, path } = await loadDependencies();
       const { Client, LocalAuth } = WhatsAppClient.default || WhatsAppClient;
       
-      // Configurar cliente WhatsApp
+      // Configurar cliente WhatsApp com correções para o problema do 'ready'
       this.client = new Client({
         authStrategy: new LocalAuth({
           clientId: 'financial-agent',
@@ -191,9 +192,27 @@ class WhatsAppService {
             '--no-first-run',
             '--no-zygote',
             '--single-process',
-            '--disable-gpu'
-          ]
-        }
+            '--disable-gpu',
+            // Correções específicas para o problema do 'ready'
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-ipc-flooding-protection',
+            '--window-size=1366,768'
+          ],
+          defaultViewport: null,
+          timeout: 60000,
+          protocolTimeout: 60000
+        },
+        // Configurações adicionais para estabilidade
+        webVersionCache: {
+          type: 'remote',
+          remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
+        },
+        takeoverOnConflict: true,
+        takeoverTimeoutMs: 60000
       });
       
       // Configurar eventos
@@ -253,19 +272,47 @@ class WhatsAppService {
       // Debug: Aguardar evento 'ready'
       console.log('⏳ Aguardando evento \'ready\' do WhatsApp...');
       
-      // Timeout para detectar se 'ready' não dispara
-      setTimeout(() => {
+      // Timeout mais longo com lógica de retry
+      this.readyTimeout = setTimeout(async () => {
         if (!this.isReady) {
-          console.log('⚠️ AVISO: Evento \'ready\' não disparou em 30 segundos!');
-          console.log('🔍 Status atual: authenticated mas não ready');
-          console.log('💡 Possível problema: Sessão incompleta ou incompatibilidade');
+          console.log('⚠️ AVISO: Evento \'ready\' não disparou em 60 segundos!');
+          console.log('🔧 Aplicando correção automática...');
+          
+          try {
+            // Tentar refresh da página do WhatsApp Web
+            if (this.client.pupPage) {
+              console.log('🔄 Fazendo refresh da página...');
+              await this.client.pupPage.reload({ waitUntil: 'networkidle0' });
+              
+              // Aguardar mais 30 segundos após refresh
+              setTimeout(() => {
+                if (!this.isReady) {
+                  console.log('❌ Correção não funcionou. Sessão pode estar corrompida.');
+                  console.log('💡 Recomendação: Use /api/whatsapp/reset e tente novamente');
+                }
+              }, 30000);
+            } else {
+              console.log('❌ Não foi possível acessar a página do navegador');
+              console.log('💡 Recomendação: Use /api/whatsapp/reset e tente novamente');
+            }
+          } catch (error) {
+            console.error('❌ Erro na correção automática:', error.message);
+            console.log('💡 Recomendação: Use /api/whatsapp/reset e tente novamente');
+          }
         }
-      }, 30000);
+      }, 60000); // 60 segundos em vez de 30
     });
     
     // Cliente pronto
     this.client.on('ready', async () => {
       console.log('✅ WhatsApp Client está pronto!');
+      
+      // Limpar timeout se existir
+      if (this.readyTimeout) {
+        clearTimeout(this.readyTimeout);
+        this.readyTimeout = null;
+      }
+      
       this.isReady = true;
       await this.updateConnectionStatus('ready');
       
@@ -315,14 +362,8 @@ class WhatsAppService {
 
   // Processar mensagem recebida
   async handleIncomingMessage(message) {
-    // Log básico para debug
-    console.log('🔍 DEBUG: Mensagem capturada:', {
-      from: message.from,
-      body: message.body,
-      type: message.type,
-      isStatus: message.isStatus,
-      fromMe: message.fromMe
-    });
+    // Log simplificado
+    console.log(`📨 Mensagem recebida de ${message.from}: ${message.body}`);
     
     // Ignorar mensagens de status e grupos por enquanto
     if (message.isStatus || message.from.includes('@g.us')) {
@@ -350,10 +391,11 @@ class WhatsAppService {
       return;
     }
     
-    console.log(`📨 Mensagem recebida de ${message.from}: ${message.body}`);
+    // Log sanitizado para proteger senhas
+    const sanitizedBody = this.sanitizeMessageForLog(message.body);
     logger.info('Mensagem recebida', {
       from: message.from,
-      body: message.body,
+      body: sanitizedBody,
       timestamp: message.timestamp
     });
     
@@ -447,26 +489,35 @@ class WhatsAppService {
     }
   }
 
+  // Sanitizar mensagem para logs (proteger senhas)
+  sanitizeMessageForLog(message) {
+    if (!message) return message;
+    
+    // Verificar se parece ser uma senha (6-50 caracteres, sem espaços)
+    if (message.length >= 6 && message.length <= 50 && !message.includes(' ')) {
+      // Verificar se não é email ou transação comum
+      if (!message.includes('@') && !message.toLowerCase().includes('real') && 
+          !message.toLowerCase().includes('gastei') && !message.toLowerCase().includes('recebi')) {
+        return '[POSSÍVEL SENHA PROTEGIDA]';
+      }
+    }
+    
+    return message;
+  }
+
   // Enviar mensagem
   async sendMessage(to, message) {
-    console.log(`🔍 DEBUG: Tentando enviar mensagem para ${to}`);
-    console.log(`🔍 DEBUG: isReady = ${this.isReady}, client = ${!!this.client}`);
-    
     if (!this.isReady || !this.client) {
-      console.log('❌ DEBUG: Cliente não está pronto ou não existe');
       throw new Error('WhatsApp Client não está pronto');
     }
     
     try {
-      console.log(`🔍 DEBUG: Chamando client.sendMessage(${to}, mensagem)`);
       const result = await this.client.sendMessage(to, message);
-      console.log(`✅ DEBUG: Resultado do envio:`, result);
       console.log(`📤 Mensagem enviada para ${to}: ${message}`);
       logger.info('Mensagem enviada', { to, message });
       return result;
     } catch (error) {
-      console.error('❌ Erro ao enviar mensagem:', error);
-      console.error('❌ DEBUG: Stack trace completo:', error.stack);
+      console.error('❌ Erro ao enviar mensagem:', error.message);
       logger.error('Erro ao enviar mensagem', { to, message, error: error.message });
       throw error;
     }
@@ -496,6 +547,12 @@ class WhatsAppService {
   async reset() {
     try {
       console.log('🔄 Resetando conexão WhatsApp...');
+      
+      // Limpar timeout se existir
+      if (this.readyTimeout) {
+        clearTimeout(this.readyTimeout);
+        this.readyTimeout = null;
+      }
       
       if (this.client) {
         await this.client.destroy();

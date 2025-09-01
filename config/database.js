@@ -307,7 +307,10 @@ class DatabaseService {
           phone_number: phoneNumber,
           step: step,
           data: data,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'phone_number'
         })
         .select()
         .single();

@@ -408,25 +408,8 @@ async function startApplication() {
         auth: 'Firebase enabled'
       });
       
-      // Inicializar WhatsApp automaticamente após servidor estar pronto
-      try {
-        console.log('📱 Inicializando WhatsApp automaticamente...');
-        await whatsappService.initialize();
-        console.log('✅ WhatsApp inicializado automaticamente!');
-        
-        logger.info('WhatsApp inicializado automaticamente', {
-          timestamp: new Date().toISOString(),
-          status: 'success'
-        });
-      } catch (error) {
-        console.log('⚠️ WhatsApp não pôde ser inicializado automaticamente:', error.message);
-        console.log('💡 Use a API /api/whatsapp/initialize para conectar manualmente');
-        
-        logger.warn('Falha na inicialização automática do WhatsApp', {
-          error: error.message,
-          timestamp: new Date().toISOString()
-        });
-      }
+      // WhatsApp será inicializado via API /api/whatsapp/initialize
+      console.log('💡 Para conectar o WhatsApp, use: POST /api/whatsapp/initialize');
     });
     
     // Graceful shutdown

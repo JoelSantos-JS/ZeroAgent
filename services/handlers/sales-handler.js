@@ -32,8 +32,9 @@ class SalesHandler extends BaseHandler {
     try {
       console.log('🚀 Inicializando SalesHandler...');
       
-      // Iniciar sincronização automática
-      await this.startAutoSync();
+      // Sincronização automática desabilitada temporariamente
+      // para evitar conflitos com WhatsApp Web.js
+      console.log('⚠️ Sincronização automática desabilitada (modo manual)');
       
       console.log('✅ SalesHandler inicializado com sucesso!');
       logger.info('SalesHandler inicializado');
