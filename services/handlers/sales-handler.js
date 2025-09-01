@@ -454,12 +454,45 @@ class SalesHandler extends BaseHandler {
                `💡 *Ou: "Cliente comprou projetor por 50"*`;
       }
       
-      // Buscar produto no banco de dados
+      // Buscar produto no banco de dados com lógica melhorada
       const products = await this.databaseService.getUserProducts(userId, 100);
-      const product = products.find(p => 
-        p.name?.toLowerCase().includes(productName.toLowerCase()) ||
-        p.product_name?.toLowerCase().includes(productName.toLowerCase())
-      );
+      
+      // Primeiro: busca exata
+      let product = products.find(p => {
+        const pName = (p.name || p.product_name || '').toLowerCase();
+        const searchName = productName.toLowerCase();
+        return pName === searchName;
+      });
+      
+      // Segundo: busca por palavras-chave com validação bidirecional
+      if (!product) {
+        product = products.find(p => {
+          const pName = (p.name || p.product_name || '').toLowerCase();
+          const searchName = productName.toLowerCase();
+          
+          // Verificar se há match bidirecional (ambos contêm palavras do outro)
+          const pWords = pName.split(' ').filter(w => w.length > 2);
+          const sWords = searchName.split(' ').filter(w => w.length > 2);
+          
+          // Pelo menos 50% das palavras devem fazer match
+          const matches = pWords.filter(pw => sWords.some(sw => 
+            pw.includes(sw) || sw.includes(pw)
+          ));
+          
+          return matches.length >= Math.max(1, Math.floor(pWords.length * 0.5));
+        });
+      }
+      
+      // Se não encontrou produto, oferecer opções
+      if (!product) {
+        const availableProducts = products.slice(0, 5).map(p => 
+          `• ${p.name || p.product_name}`
+        ).join('\n');
+        
+        return `❌ **Produto "${productName}" não encontrado**\n\n` +
+               `📦 **Produtos disponíveis:**\n${availableProducts}\n\n` +
+               `💡 *Use o nome exato ou digite "criar produto ${productName}"*`;
+      }
       
       let finalPrice = valor;
       let priceConfirmation = '';
@@ -492,14 +525,38 @@ class SalesHandler extends BaseHandler {
         const margin = costPrice > 0 && finalPrice > 0 ? ((finalPrice - costPrice) / finalPrice * 100) : 30;
         
         // Registrar como receita no sistema financeiro
-        await this.databaseService.createTransaction(
+        console.log(`💾 Salvando venda no banco: ${product.name || product.product_name} - R$ ${finalPrice}`);
+        const transaction = await this.databaseService.createTransaction(
           userId,
-          'receita', // Usar 'receita' em vez de 'income'
+          'revenue', // Corrigido: usar 'revenue' em vez de 'receita'
           finalPrice,
           'vendas',
           `Venda: ${product.name || product.product_name}`,
           new Date()
         );
+        console.log(`✅ Transação salva com ID: ${transaction.id}`);
+        
+        // TAMBÉM salvar na tabela sales específica
+        const buyerName = this.extractBuyerName(descricao) || 'Cliente';
+        const saleRecord = await this.databaseService.supabase
+            .from('sales')
+            .insert({
+              user_id: userId,
+              product_id: product.id,
+              quantity: 1, // Assumir 1 unidade por padrão
+              unit_price: finalPrice,
+              buyer_name: buyerName
+              // Removido: total_amount (campo calculado automaticamente)
+              // Removido: created_at (preenchido automaticamente)
+            })
+          .select()
+          .single();
+        
+        if (saleRecord.error) {
+          console.error('⚠️ Erro ao salvar na tabela sales:', saleRecord.error);
+        } else {
+          console.log(`✅ Venda salva na tabela sales com ID: ${saleRecord.data.id}`);
+        }
         
         // Atualizar métricas
         this.metrics.totalSalesProcessed++;
@@ -530,14 +587,39 @@ class SalesHandler extends BaseHandler {
         }
         
         // Registrar venda de produto não cadastrado
-        await this.databaseService.createTransaction(
+        console.log(`💾 Salvando venda de produto não cadastrado: ${productName} - R$ ${valor}`);
+        const transaction = await this.databaseService.createTransaction(
           userId,
-          'receita',
+          'revenue', // Corrigido: usar 'revenue' em vez de 'receita'
           valor,
           'vendas',
           `Venda: ${productName}`,
           new Date()
         );
+        console.log(`✅ Transação de produto não cadastrado salva com ID: ${transaction.id}`);
+        
+        // TAMBÉM salvar na tabela sales (sem product_id para produtos não cadastrados)
+        const buyerName = this.extractBuyerName(descricao) || 'Cliente';
+        const saleRecord = await this.databaseService.supabase
+            .from('sales')
+            .insert({
+              user_id: userId,
+              product_id: null, // Produto não cadastrado
+              quantity: 1,
+              unit_price: valor,
+              buyer_name: buyerName
+              // Removido: total_amount (campo calculado automaticamente)
+              // Removido: created_at (preenchido automaticamente)
+              // Removido: notes (campo pode não existir na tabela)
+            })
+          .select()
+          .single();
+        
+        if (saleRecord.error) {
+          console.error('⚠️ Erro ao salvar produto não cadastrado na tabela sales:', saleRecord.error);
+        } else {
+          console.log(`✅ Venda de produto não cadastrado salva na tabela sales com ID: ${saleRecord.data.id}`);
+        }
         
         this.metrics.totalSalesProcessed++;
         this.metrics.totalRevenue += valor;
@@ -733,9 +815,38 @@ class SalesHandler extends BaseHandler {
   extractProductName(descricao) {
     if (!descricao) return null;
     
-    const text = descricao.toLowerCase();
+    console.log(`🔍 Extraindo produto de: "${descricao}"`);
     
-    // Produtos comuns para detectar
+    // Padrões melhorados para extrair nome completo do produto
+    const patterns = [
+      // "Venda do fone Lenovo GM pro por 67" -> "fone Lenovo GM pro"
+      /(?:venda|vendi|vendeu|comprou)\s+(?:do|da|de|o|a)?\s*([^0-9]+?)\s+(?:por|de|em|R\$)\s*[0-9]/i,
+      // "Registrar venda Lenovo 58 reais" -> "Lenovo"
+      /(?:registrar\s+venda|venda)\s+([^0-9]+?)\s+[0-9]/i,
+      // "Estoque do mouse gamer" -> "mouse gamer"
+      /(?:estoque|tem|quantos)\s+(?:do|da|de|o|a)?\s*([a-záêçõ\s]+?)\s*$/i,
+      // "mouse gamer disponível" -> "mouse gamer"
+      /([a-záêçõ\s]+?)\s+(?:disponível|em estoque)/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = descricao.match(pattern);
+      if (match && match[1]) {
+        let productName = match[1].trim();
+        
+        // Limpar palavras desnecessárias
+        productName = productName.replace(/\b(do|da|de|o|a|um|uma|cliente|para|pra)\b/gi, ' ');
+        productName = productName.replace(/\s+/g, ' ').trim();
+        
+        if (productName.length > 2) {
+          console.log(`✅ Produto extraído: "${productName}"`);
+          return productName;
+        }
+      }
+    }
+    
+    // Fallback: buscar por produtos comuns
+    const text = descricao.toLowerCase();
     const commonProducts = [
       'fone', 'fones', 'headphone', 'earphone',
       'projetor', 'projetores',
@@ -751,24 +862,54 @@ class SalesHandler extends BaseHandler {
     
     for (const product of commonProducts) {
       if (text.includes(product)) {
+        console.log(`⚠️ Produto genérico encontrado: "${product}"`);
         return product.charAt(0).toUpperCase() + product.slice(1);
       }
     }
     
-    // Tentar extrair usando padrões
+    console.log(`❌ Nenhum produto encontrado em: "${descricao}"`);
+    return null;
+  }
+
+  /**
+   * Extrair nome do comprador da descrição
+   * @param {string} descricao - Descrição da mensagem
+   * @returns {string|null} - Nome do comprador extraído
+   */
+  extractBuyerName(descricao) {
+    if (!descricao) return null;
+    
+    console.log(`👤 Extraindo comprador de: "${descricao}"`);
+    
+    // Padrões para extrair nome do comprador
     const patterns = [
-      /(?:vendi|vendeu|comprou)\s+([a-záêçõ\s]+?)\s+(?:por|de|em)/i,
-      /(?:estoque|tem|quantos)\s+([a-záêçõ\s]+?)\s*$/i,
-      /([a-záêçõ\s]+?)\s+(?:disponível|em estoque)/i
+      // "Venda para o cliente Miguel" -> "Miguel"
+      /(?:para|pra)\s+(?:o|a)?\s*cliente\s+([a-záêçõ\s]+?)(?:\s|$)/i,
+      // "Cliente João comprou" -> "João"
+      /cliente\s+([a-záêçõ\s]+?)\s+(?:comprou|levou)/i,
+      // "Vendeu para Maria" -> "Maria"
+      /(?:vendeu|vendi)\s+para\s+([a-záêçõ\s]+?)(?:\s|$)/i,
+      // "João comprou" -> "João"
+      /([a-záêçõ]+)\s+(?:comprou|levou|pegou)/i
     ];
     
     for (const pattern of patterns) {
       const match = descricao.match(pattern);
       if (match && match[1]) {
-        return match[1].trim();
+        let buyerName = match[1].trim();
+        
+        // Limpar palavras desnecessárias
+        buyerName = buyerName.replace(/\b(do|da|de|o|a|um|uma|por|reais?)\b/gi, ' ');
+        buyerName = buyerName.replace(/\s+/g, ' ').trim();
+        
+        if (buyerName.length > 1) {
+          console.log(`✅ Comprador extraído: "${buyerName}"`);
+          return buyerName;
+        }
       }
     }
     
+    console.log(`⚠️ Nenhum comprador encontrado em: "${descricao}"`);
     return null;
   }
 
