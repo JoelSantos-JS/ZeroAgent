@@ -4,6 +4,7 @@ const userService = require('./user-service');
 const geminiService = require('./gemini-service');
 const AudioProcessor = require('./audio-processor');
 const logger = require('../utils/logger');
+const { GoalModel } = require('../database/models');
 
 // Importar handlers especializados
 const ExpenseHandler = require('./handlers/expense-handler');
@@ -12,6 +13,7 @@ const InvestmentHandler = require('./handlers/investment-handler');
 const QueryHandler = require('./handlers/query-handler');
 const CorrectionHandler = require('./handlers/correction-handler');
 const SalesHandler = require('./handlers/sales-handler');
+const GoalHandler = require('./handlers/goal-handler');
 
 // Importar utilitários
 const DataParser = require('./parsers/data-parser');
@@ -36,8 +38,12 @@ class FinancialAgent {
       income: null,
       investment: null,
       query: null,
-      correction: null
+      correction: null,
+      goal: null
     };
+    
+    // Modelo de metas
+    this.goalModel = null;
   }
 
   /**
@@ -52,6 +58,9 @@ class FinancialAgent {
       await geminiService.initialize();
       await this.audioProcessor.initialize();
       
+      // Inicializar modelo de metas
+      this.goalModel = new GoalModel(databaseService);
+      
       // Inicializar handlers especializados
       this.handlers.correction = new CorrectionHandler(databaseService, userService);
       this.handlers.sales = new SalesHandler(databaseService, userService);
@@ -59,6 +68,7 @@ class FinancialAgent {
       this.handlers.income = new IncomeHandler(databaseService, userService);
       this.handlers.investment = new InvestmentHandler(databaseService, userService);
       this.handlers.query = new QueryHandler(databaseService, userService);
+      this.handlers.goal = new GoalHandler(databaseService, userService, this.goalModel);
       
       // Conectar correction handler com outros handlers
       this.handlers.expense.setCorrectionHandler(this.handlers.correction);
@@ -199,6 +209,11 @@ class FinancialAgent {
         return correctionResult;
       }
       
+      // Verificar se é comando relacionado a metas
+      if (this.isGoalCommand(analysisResult)) {
+        return await this.handlers.goal.process(userId, analysisResult);
+      }
+      
       // Verificar se é comando relacionado a vendas
       const salesResult = await this.handlers.sales.process(userId, analysisResult);
       if (salesResult !== null) {
@@ -231,6 +246,47 @@ class FinancialAgent {
       console.error('❌ Erro ao rotear para handler:', error);
       return ResponseFormatter.formatErrorMessage('transação', analysisResult.valor, error.message);
     }
+  }
+
+  /**
+   * Verificar se é um comando relacionado a metas
+   * @param {Object} analysisResult - Resultado da análise do Gemini
+   * @returns {boolean} - True se for comando de meta
+   */
+  isGoalCommand(analysisResult) {
+    const { acao, tipo, texto_original } = analysisResult;
+    
+    // Verificar ações específicas de metas
+    const goalActions = [
+      'criar_meta', 'nova_meta', 'listar_metas', 'minhas_metas', 'ver_metas',
+      'progresso_meta', 'status_meta', 'atualizar_meta', 'adicionar_progresso',
+      'deletar_meta', 'remover_meta', 'categorias_meta', 'tipos_meta',
+      'estatisticas_metas', 'resumo_metas'
+    ];
+    
+    if (acao && goalActions.includes(acao.toLowerCase())) {
+      return true;
+    }
+    
+    // Verificar tipo específico de meta
+    if (tipo === 'meta' || tipo === 'objetivo') {
+      return true;
+    }
+    
+    // Verificar palavras-chave no texto original
+    if (texto_original) {
+      const goalKeywords = [
+        'meta', 'objetivo', 'juntar', 'economizar', 'limite de gasto',
+        'limite gasto', 'meta de', 'quero juntar', 'vou economizar',
+        'minha meta', 'minhas metas', 'progresso', 'atingir',
+        'conquistar', 'poupar', 'guardar dinheiro'
+      ];
+      
+      const lowerText = texto_original.toLowerCase();
+      return goalKeywords.some(keyword => lowerText.includes(keyword));
+    }
+    
+    return false;
   }
 
   /**
