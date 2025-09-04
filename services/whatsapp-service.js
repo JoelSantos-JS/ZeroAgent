@@ -74,7 +74,7 @@ class WhatsAppService {
           const { fs, path } = await loadDependencies();
           
           // Verificar se existe diretório de sessão
-          const authDir = path.join(process.cwd(), '.wwebjs_auth', 'session-financial-agent');
+          const authDir = path.join(process.cwd(), '.wwebjs_auth', 'session-vox-agent');
           if (fs.existsSync(authDir)) {
             console.log('📱 Sessão encontrada! Inicializando automaticamente...');
             // Aguardar um pouco para evitar conflitos
@@ -179,7 +179,7 @@ class WhatsAppService {
       // Configurar cliente WhatsApp com correções para o problema do 'ready'
       this.client = new Client({
         authStrategy: new LocalAuth({
-          clientId: 'financial-agent',
+          clientId: 'vox-agent',
           dataPath: path.join(process.cwd(), '.wwebjs_auth')
         }),
         puppeteer: {
@@ -412,7 +412,7 @@ class WhatsAppService {
       }
     } else {
       // Resposta padrão se não há processador configurado
-      await this.sendMessage(message.from, '🤖 Olá! Eu sou o **Zero**, seu assistente financeiro. Envie uma mensagem como "Gastei 50 reais no supermercado" para registrar uma transação.');
+      await this.sendMessage(message.from, '🤖 Olá! Eu sou o **Vox**, seu assistente financeiro. Envie uma mensagem como "Gastei 50 reais no supermercado" para registrar uma transação.');
     }
   }
 

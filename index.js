@@ -59,7 +59,7 @@ app.use((req, res, next) => {
 app.get('/api/status', async (req, res) => {
   try {
     const status = {
-      app: 'Financial WhatsApp Agent',
+      app: 'VoxCash - Assistente Financeiro IA',
       version: '1.0.0',
       timestamp: new Date().toISOString(),
       services: {
@@ -379,7 +379,7 @@ app.use('*', (req, res) => {
 // Função para inicializar a aplicação
 async function startApplication() {
   try {
-    console.log('🚀 Iniciando Financial WhatsApp Agent...');
+    console.log('🚀 Iniciando VoxCash - Assistente Financeiro IA...');
     
     // Inicializar banco de dados
     await databaseService.initialize();
@@ -389,9 +389,9 @@ async function startApplication() {
     await authService.initialize();
     console.log('✅ Serviço de autenticação inicializado');
     
-    // Inicializar agente financeiro
+    // Inicializar Vox Agent
     await financialAgent.initialize();
-    console.log('✅ Agente financeiro inicializado');
+    console.log('✅ Vox Agent inicializado');
     
     // Configurar processador de mensagens do WhatsApp
     whatsappService.setMessageProcessor(financialAgent);

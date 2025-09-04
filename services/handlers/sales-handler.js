@@ -198,7 +198,7 @@ class SalesHandler extends BaseHandler {
       const profit = total_amount - costTotal;
       const margin = total_amount > 0 ? ((profit / total_amount) * 100) : 0;
 
-      // Criar transação de receita no Zero Agent
+      // Criar transação de receita no Vox Agent
       const transactionData = {
         user_id: userId,
         type: 'income',

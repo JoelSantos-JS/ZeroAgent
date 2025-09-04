@@ -1,6 +1,6 @@
-# Agente Financeiro WhatsApp + IA
+# VoxCash - Assistente Financeiro IA
 
-Um agente de IA financeiro integrado ao WhatsApp que utiliza o Google Gemini para processar mensagens, identificar transações financeiras e registrar dados em um CRM.
+VoxCash é um assistente de IA financeiro integrado ao WhatsApp que utiliza o Google Gemini para processar mensagens, identificar transações financeiras e registrar dados automaticamente.
 
 ## 🚀 Funcionalidades
 
@@ -22,7 +22,7 @@ Um agente de IA financeiro integrado ao WhatsApp que utiliza o Google Gemini par
 1. Clone o repositório:
 ```bash
 git clone <repository-url>
-cd financial-whatsapp-agent
+cd voxcash
 ```
 
 2. Instale as dependências:

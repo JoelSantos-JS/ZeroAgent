@@ -83,7 +83,7 @@ const configExample = {
     apiKey: 'sua_chave_da_api_gemini'
   },
   whatsapp: {
-    sessionName: 'financial-agent-session',
+    sessionName: 'vox-agent-session',
     timeout: 60000
   },
   server: {

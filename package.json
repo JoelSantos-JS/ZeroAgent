@@ -1,7 +1,7 @@
 {
-  "name": "financial-whatsapp-agent",
+  "name": "voxcash",
   "version": "1.0.0",
-  "description": "Agente de IA financeiro integrado ao WhatsApp e CRM com processamento via Gemini",
+  "description": "VoxCash - Assistente de IA financeiro integrado ao WhatsApp com processamento via Gemini",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -24,7 +24,7 @@
     "crm",
     "bot"
   ],
-  "author": "Financial Agent",
+  "author": "VoxCash Team",
   "license": "MIT",
   "dependencies": {
     "@google/generative-ai": "^0.2.1",

@@ -270,7 +270,7 @@ class ResponseFormatter {
     const greeting = userName ? `Olá, **${userName}**!` : 'Olá!';
     
     return `👋 ${greeting}\n\n` +
-           `🤖 Eu sou o **Zero**, seu assistente financeiro e de vendas. Posso ajudar você a:\n\n` +
+           `🤖 Eu sou o **Vox**, seu assistente financeiro e de vendas. Posso ajudar você a:\n\n` +
            `💰 **Finanças Pessoais:**\n` +
            `• Registrar gastos\n` +
            `• Registrar receitas\n` +

@@ -18,7 +18,7 @@ class WhatsAppFix {
   getOptimizedConfig() {
     return {
       authStrategy: new LocalAuth({
-        clientId: 'financial-agent-fixed',
+        clientId: 'vox-agent-fixed',
         dataPath: path.join(process.cwd(), '.wwebjs_auth_fixed')
       }),
       puppeteer: {
