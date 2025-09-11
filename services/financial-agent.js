@@ -16,6 +16,11 @@ const SalesHandler = require('./handlers/sales-handler');
 const GoalHandler = require('./handlers/goal-handler');
 const DebtHandler = require('./handlers/debt-handler');
 
+// Importar handlers de finanças pessoais
+const PersonalIncomeHandler = require('./handlers/personal-income-handler');
+const PersonalExpenseHandler = require('./handlers/personal-expense-handler');
+const { personalFinanceService } = require('./personal-finance-service');
+
 // Importar utilitários
 const DataParser = require('./parsers/data-parser');
 const ResponseFormatter = require('./formatters/response-formatter');
@@ -41,7 +46,10 @@ class FinancialAgent {
       query: null,
       correction: null,
       goal: null,
-      debt: null
+      debt: null,
+      // Handlers de finanças pessoais
+      personalIncome: null,
+      personalExpense: null
     };
     
     // Modelos
@@ -65,6 +73,9 @@ class FinancialAgent {
       this.goalModel = new GoalModel(databaseService);
       this.debtModel = new DebtModel(databaseService);
       
+      // Inicializar serviço de finanças pessoais
+      await personalFinanceService.initialize();
+      
       // Inicializar handlers especializados
       this.handlers.correction = new CorrectionHandler(databaseService, userService);
       this.handlers.sales = new SalesHandler(databaseService, userService);
@@ -74,6 +85,10 @@ class FinancialAgent {
       this.handlers.query = new QueryHandler(databaseService, userService);
       this.handlers.goal = new GoalHandler(databaseService, userService, this.goalModel);
       this.handlers.debt = new DebtHandler(databaseService, userService, this.debtModel);
+      
+      // Inicializar handlers de finanças pessoais
+      this.handlers.personalIncome = new PersonalIncomeHandler(databaseService, userService);
+      this.handlers.personalExpense = new PersonalExpenseHandler(databaseService, userService);
       
       // Conectar correction handler com outros handlers
       this.handlers.expense.setCorrectionHandler(this.handlers.correction);
@@ -236,9 +251,16 @@ class FinancialAgent {
         case 'receita':
           return await this.handlers.income.process(userId, analysisResult);
           
+        case 'receita_pessoal':
+          return await this.handlers.personalIncome.process(userId, analysisResult);
+          
         case 'despesa_fixa':
         case 'despesa_variavel':
           return await this.handlers.expense.process(userId, analysisResult);
+          
+        case 'gasto_pessoal':
+        case 'despesa_pessoal':
+          return await this.handlers.personalExpense.process(userId, analysisResult);
           
         case 'investimento':
           return await this.handlers.investment.process(userId, analysisResult);

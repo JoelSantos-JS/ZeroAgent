@@ -291,6 +291,16 @@ class SalesHandler extends BaseHandler {
     try {
       const { descricao, intencao } = analysisResult;
       
+      // Verificar se é resposta a sugestão de produto (número)
+      if (this.isProductSuggestionResponse(descricao)) {
+        return await this.handleProductSuggestionResponse(userId, descricao);
+      }
+      
+      // Verificar se é comando de criação de produto
+      if (this.isCreateProductCommand(descricao)) {
+        return await this.handleCreateProductCommand(userId, descricao, analysisResult);
+      }
+      
       // Verificar se é comando de sincronização
       if (this.isSyncCommand(descricao, intencao)) {
         return await this.handleSyncCommand(userId);
@@ -322,6 +332,125 @@ class SalesHandler extends BaseHandler {
       console.error('❌ Erro no SalesHandler:', error);
       return '❌ Erro ao processar comando de vendas. Tente novamente.';
     }
+  }
+
+  /**
+   * Verificar se é resposta numérica a sugestão de produto
+   * @param {string} descricao - Descrição da mensagem
+   * @returns {boolean}
+   */
+  isProductSuggestionResponse(descricao) {
+    const text = descricao?.toLowerCase().trim() || '';
+    return /^[1-3]$/.test(text); // Aceita apenas números 1, 2 ou 3
+  }
+  
+  /**
+   * Verificar se é comando de criação de produto
+   * @param {string} descricao - Descrição da mensagem
+   * @returns {boolean}
+   */
+  isCreateProductCommand(descricao) {
+    const text = descricao?.toLowerCase() || '';
+    return text.includes('criar') && (text.includes('produto') || text.match(/criar\s+\w+/));
+  }
+  
+  /**
+   * Processar resposta numérica a sugestão de produto
+   * @param {string} userId - ID do usuário
+   * @param {string} descricao - Número escolhido
+   * @returns {Promise<string>} - Resposta formatada
+   */
+  async handleProductSuggestionResponse(userId, descricao) {
+    // TODO: Implementar sistema de cache de sugestões por usuário
+    // Por enquanto, retornar mensagem informativa
+    return `💡 **Sistema de sugestões ativo!**\n\n` +
+           `Para usar as sugestões, primeiro faça uma venda que não encontre o produto.\n` +
+           `Exemplo: "Vendi kz por 85 reais"`;
+  }
+  
+  /**
+   * Processar comando de criação de produto
+   * @param {string} userId - ID do usuário
+   * @param {string} descricao - Descrição do comando
+   * @param {Object} analysisResult - Resultado da análise
+   * @returns {Promise<string>} - Resposta formatada
+   */
+  async handleCreateProductCommand(userId, descricao, analysisResult) {
+    try {
+      // Extrair nome do produto do comando "criar produto X" ou "criar X"
+      const productName = this.extractProductNameFromCreateCommand(descricao);
+      
+      if (!productName) {
+        return `❌ **Nome do produto não identificado**\n\n` +
+               `💡 *Exemplo: "criar produto fone bluetooth"*\n` +
+               `💡 *Ou: "criar kz edx pro"*`;
+      }
+      
+      // Verificar se produto já existe
+      const products = await this.databaseService.getUserProducts(userId, 100);
+      const existingProduct = products.find(p => {
+        const pName = (p.name || p.product_name || '').toLowerCase();
+        return pName === productName.toLowerCase();
+      });
+      
+      if (existingProduct) {
+        return `⚠️ **Produto "${productName}" já existe!**\n\n` +
+               `📦 *Nome completo: ${existingProduct.name || existingProduct.product_name}*\n\n` +
+               `💡 *Use o nome exato para registrar vendas.*`;
+      }
+      
+      // Criar produto básico
+      const newProduct = {
+        name: productName,
+        product_name: productName,
+        category: 'outros',
+        price: 0,
+        selling_price: 0,
+        cost_price: 0,
+        description: `Produto criado automaticamente: ${productName}`,
+        purchase_date: new Date().toISOString()
+      };
+      
+      const createdProduct = await this.databaseService.createProduct(userId, newProduct);
+      
+      return `✅ **Produto "${productName}" criado com sucesso!**\n\n` +
+             `📦 **Próximos passos:**\n` +
+             `• Defina o preço de venda\n` +
+             `• Adicione categoria específica\n` +
+             `• Configure custo de compra\n\n` +
+             `💡 *Agora você pode registrar vendas deste produto!*`;
+             
+    } catch (error) {
+      console.error('❌ Erro ao criar produto:', error);
+      return '❌ Erro ao criar produto. Tente novamente.';
+    }
+  }
+  
+  /**
+   * Extrair nome do produto de comando de criação
+   * @param {string} descricao - Descrição do comando
+   * @returns {string|null} - Nome do produto
+   */
+  extractProductNameFromCreateCommand(descricao) {
+    const text = descricao.toLowerCase().trim();
+    
+    // Padrões: "criar produto X", "criar X"
+    const patterns = [
+      /criar\s+produto\s+(.+)/,
+      /criar\s+(.+)/
+    ];
+    
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        const productName = match[1].trim();
+        if (productName.length > 1) {
+          return productName;
+        }
+      }
+    }
+    
+    return null;
   }
 
   /**
@@ -454,44 +583,36 @@ class SalesHandler extends BaseHandler {
                `💡 *Ou: "Cliente comprou projetor por 50"*`;
       }
       
-      // Buscar produto no banco de dados com lógica melhorada
+      // Buscar produto no banco de dados com lógica inteligente melhorada
       const products = await this.databaseService.getUserProducts(userId, 100);
       
-      // Primeiro: busca exata
-      let product = products.find(p => {
-        const pName = (p.name || p.product_name || '').toLowerCase();
-        const searchName = productName.toLowerCase();
-        return pName === searchName;
-      });
+      // Sistema de busca inteligente em múltiplas etapas
+      let product = await this.findProductIntelligent(products, productName);
       
-      // Segundo: busca por palavras-chave com validação bidirecional
+      // Se não encontrou produto, oferecer sugestões inteligentes
       if (!product) {
-        product = products.find(p => {
-          const pName = (p.name || p.product_name || '').toLowerCase();
-          const searchName = productName.toLowerCase();
+        const suggestions = this.findProductSuggestions(products, productName);
+        
+        if (suggestions.length > 0) {
+          const suggestionsList = suggestions.map((s, index) => 
+            `${index + 1}. ${s.name} (${s.confidence}% similar)`
+          ).join('\n');
           
-          // Verificar se há match bidirecional (ambos contêm palavras do outro)
-          const pWords = pName.split(' ').filter(w => w.length > 2);
-          const sWords = searchName.split(' ').filter(w => w.length > 2);
-          
-          // Pelo menos 50% das palavras devem fazer match
-          const matches = pWords.filter(pw => sWords.some(sw => 
-            pw.includes(sw) || sw.includes(pw)
-          ));
-          
-          return matches.length >= Math.max(1, Math.floor(pWords.length * 0.5));
-        });
-      }
-      
-      // Se não encontrou produto, oferecer opções
-      if (!product) {
+          return `🤔 **Produto "${productName}" não encontrado**\n\n` +
+                 `💡 **Você quis dizer:**\n${suggestionsList}\n\n` +
+                 `📝 **Opções:**\n` +
+                 `• Responda com o número da sugestão\n` +
+                 `• Digite "criar ${productName}" para criar novo produto\n` +
+                 `• Use o nome exato de um produto existente`;
+        }
+        
         const availableProducts = products.slice(0, 5).map(p => 
           `• ${p.name || p.product_name}`
         ).join('\n');
         
         return `❌ **Produto "${productName}" não encontrado**\n\n` +
                `📦 **Produtos disponíveis:**\n${availableProducts}\n\n` +
-               `💡 *Use o nome exato ou digite "criar produto ${productName}"*`;
+               `💡 *Digite "criar ${productName}" para criar novo produto*`;
       }
       
       let finalPrice = valor;
@@ -501,11 +622,15 @@ class SalesHandler extends BaseHandler {
         const dbPrice = product.selling_price || product.price || product.sale_price || 0;
         const costPrice = product.cost_price || product.purchase_price || product.buy_price || 0;
         
-        // Se o usuário não especificou valor, usar preço do banco
+        // Se o usuário não especificou valor, pedir confirmação
         if (!valor || valor <= 0) {
           if (dbPrice > 0) {
-            finalPrice = dbPrice;
-            priceConfirmation = `💡 *Usando preço cadastrado: R$ ${dbPrice.toFixed(2)}*\n`;
+            return `💰 **Preço não especificado para ${product.name || product.product_name}**\n\n` +
+                   `📋 **Preço cadastrado:** R$ ${dbPrice.toFixed(2)}\n\n` +
+                   `❓ **Confirme o valor da venda:**\n` +
+                   `• "Vendi ${productName} por ${dbPrice}" (usar preço cadastrado)\n` +
+                   `• "Vendi ${productName} por X reais" (especificar valor diferente)\n\n` +
+                   `💡 *Sempre confirme o valor para evitar erros!*`;
           } else {
             return `❌ **Preço não encontrado para ${product.name || product.product_name}**\n\n` +
                    `💡 *Especifique o valor: "Vendi ${productName} por X reais"*`;
@@ -805,6 +930,127 @@ class SalesHandler extends BaseHandler {
       console.error('❌ Erro ao obter detalhes do produto:', error);
       return '❌ Erro ao carregar detalhes do produto.';
     }
+  }
+
+  /**
+   * Busca inteligente de produto em múltiplas etapas
+   * @param {Array} products - Lista de produtos do usuário
+   * @param {string} searchName - Nome do produto a buscar
+   * @returns {Object|null} - Produto encontrado ou null
+   */
+  async findProductIntelligent(products, searchName) {
+    const search = searchName.toLowerCase().trim();
+    
+    // Etapa 1: Busca exata
+    let product = products.find(p => {
+      const pName = (p.name || p.product_name || '').toLowerCase();
+      return pName === search;
+    });
+    
+    if (product) {
+      console.log(`✅ Produto encontrado (busca exata): ${product.name || product.product_name}`);
+      return product;
+    }
+    
+    // Etapa 2: Busca por início do nome
+    product = products.find(p => {
+      const pName = (p.name || p.product_name || '').toLowerCase();
+      return pName.startsWith(search) || search.startsWith(pName);
+    });
+    
+    if (product) {
+      console.log(`✅ Produto encontrado (início): ${product.name || product.product_name}`);
+      return product;
+    }
+    
+    // Etapa 3: Busca por palavras-chave com score
+    const candidates = products.map(p => {
+      const pName = (p.name || p.product_name || '').toLowerCase();
+      const score = this.calculateSimilarityScore(pName, search);
+      return { product: p, score, name: pName };
+    }).filter(c => c.score > 0.6).sort((a, b) => b.score - a.score);
+    
+    if (candidates.length > 0) {
+      console.log(`✅ Produto encontrado (similaridade): ${candidates[0].product.name || candidates[0].product.product_name} (score: ${candidates[0].score})`);
+      return candidates[0].product;
+    }
+    
+    // Etapa 4: Busca por palavras individuais
+    const searchWords = search.split(' ').filter(w => w.length > 2);
+    if (searchWords.length > 0) {
+      product = products.find(p => {
+        const pName = (p.name || p.product_name || '').toLowerCase();
+        return searchWords.some(word => pName.includes(word));
+      });
+      
+      if (product) {
+        console.log(`✅ Produto encontrado (palavra-chave): ${product.name || product.product_name}`);
+        return product;
+      }
+    }
+    
+    console.log(`❌ Produto não encontrado: ${searchName}`);
+    return null;
+  }
+  
+  /**
+   * Calcular score de similaridade entre duas strings
+   * @param {string} str1 - Primeira string
+   * @param {string} str2 - Segunda string
+   * @returns {number} - Score de 0 a 1
+   */
+  calculateSimilarityScore(str1, str2) {
+    const words1 = str1.split(' ').filter(w => w.length > 1);
+    const words2 = str2.split(' ').filter(w => w.length > 1);
+    
+    if (words1.length === 0 || words2.length === 0) return 0;
+    
+    let matches = 0;
+    let totalWords = Math.max(words1.length, words2.length);
+    
+    // Contar matches exatos
+    words1.forEach(w1 => {
+      if (words2.some(w2 => w2 === w1)) {
+        matches += 1;
+      } else if (words2.some(w2 => w2.includes(w1) || w1.includes(w2))) {
+        matches += 0.7; // Match parcial
+      }
+    });
+    
+    // Bonus para strings que se contêm
+    if (str1.includes(str2) || str2.includes(str1)) {
+      matches += 0.5;
+    }
+    
+    return Math.min(1, matches / totalWords);
+  }
+  
+  /**
+   * Encontrar sugestões de produtos similares
+   * @param {Array} products - Lista de produtos
+   * @param {string} searchName - Nome buscado
+   * @returns {Array} - Lista de sugestões ordenadas por relevância
+   */
+  findProductSuggestions(products, searchName) {
+    const search = searchName.toLowerCase().trim();
+    
+    const suggestions = products.map(p => {
+      const pName = (p.name || p.product_name || '').toLowerCase();
+      const score = this.calculateSimilarityScore(pName, search);
+      
+      return {
+        product: p,
+        name: p.name || p.product_name,
+        score,
+        confidence: Math.round(score * 100)
+      };
+    })
+    .filter(s => s.score > 0.3) // Mínimo 30% de similaridade
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3); // Top 3 sugestões
+    
+    console.log(`💡 Encontradas ${suggestions.length} sugestões para "${searchName}"`);
+    return suggestions;
   }
 
   /**

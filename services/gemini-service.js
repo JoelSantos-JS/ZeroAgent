@@ -292,6 +292,12 @@ class GeminiService {
       produto_nome: null
     };
 
+    // =====================================
+    // DETECTAR CONTEXTO: PESSOAL vs EMPRESARIAL
+    // =====================================
+    const isBusinessContext = this.detectBusinessContext(messageLower);
+    const isPersonalContext = this.detectPersonalContext(messageLower);
+
     // Extrair valor
     const valorMatch = message.match(/\d+[.,]?\d*/g);
     if (valorMatch) {
@@ -316,61 +322,96 @@ class GeminiService {
        analysis.confianca = 0.95;
        analysis.dica = 'Vou buscar seus dados financeiros para você!';
      }
-     // Identificar receitas (expandido)
+     // Identificar receitas (com contexto pessoal/empresarial)
      else if (messageLower.includes('recebi') || messageLower.includes('ganhei') || messageLower.includes('salário') || 
               messageLower.includes('renda') || messageLower.includes('bonus') || messageLower.includes('bônus') ||
               messageLower.includes('freelance') || messageLower.includes('vendi') || messageLower.includes('venda') ||
               messageLower.includes('lucro') || messageLower.includes('rendimento') || messageLower.includes('entrada') ||
               messageLower.includes('recebimento') || messageLower.includes('pagamento recebido') || 
               messageLower.includes('dinheiro que recebi') || messageLower.includes('dinheiro que ganhei')) {
-       analysis.tipo = 'receita';
        
-       // Categorizar receitas por tipo
-       if (messageLower.includes('salário') || messageLower.includes('salario')) {
-         analysis.categoria = 'salario';
-       } else if (messageLower.includes('freelance') || messageLower.includes('freela')) {
-         analysis.categoria = 'freelance';
-       } else if (messageLower.includes('vendi') || messageLower.includes('venda') || messageLower.includes('vendas')) {
-         analysis.categoria = 'vendas';
-       } else if (messageLower.includes('bonus') || messageLower.includes('bônus')) {
-         analysis.categoria = 'bonus';
-       } else if (messageLower.includes('cassino') || messageLower.includes('jogo') || messageLower.includes('aposta') || messageLower.includes('loteria')) {
-         analysis.categoria = 'jogos';
-       } else if (messageLower.includes('investimento') || messageLower.includes('rendimento') || messageLower.includes('dividendo')) {
-         analysis.categoria = 'investimento';
+       // Determinar se é receita pessoal ou empresarial
+       if (isBusinessContext || (messageLower.includes('vendi') || messageLower.includes('venda') || messageLower.includes('vendas'))) {
+         analysis.tipo = 'receita'; // Empresarial
+         
+         // Categorias empresariais
+         if (messageLower.includes('vendi') || messageLower.includes('venda') || messageLower.includes('vendas')) {
+           analysis.categoria = 'vendas';
+         } else if (messageLower.includes('comissão') || messageLower.includes('comissao')) {
+           analysis.categoria = 'comissao';
+         } else {
+           analysis.categoria = 'outros';
+         }
        } else {
-         analysis.categoria = 'outros';
+         analysis.tipo = 'receita_pessoal'; // Pessoal
+         
+         // Categorias pessoais (usando padrão do sistema pessoal)
+         if (messageLower.includes('salário') || messageLower.includes('salario')) {
+           analysis.categoria = 'salary';
+         } else if (messageLower.includes('freelance') || messageLower.includes('freela')) {
+           analysis.categoria = 'freelance';
+         } else if (messageLower.includes('bonus') || messageLower.includes('bônus')) {
+           analysis.categoria = 'bonus';
+         } else if (messageLower.includes('investimento') || messageLower.includes('rendimento') || messageLower.includes('dividendo')) {
+           analysis.categoria = 'investment';
+         } else if (messageLower.includes('aluguel')) {
+           analysis.categoria = 'rental';
+         } else {
+           analysis.categoria = 'other';
+         }
        }
        
        analysis.intencao = 'registrar_receita';
        analysis.confianca = 0.9;
      }
-     // Identificar despesas fixas
-     else if (messageLower.includes('aluguel')) {
-       analysis.tipo = 'despesa_fixa';
-       analysis.categoria = 'aluguel';
-       analysis.intencao = 'registrar_despesa';
-     } else if (messageLower.includes('financiamento') || messageLower.includes('prestação')) {
-       analysis.tipo = 'despesa_fixa';
-       analysis.categoria = 'financiamento';
-       analysis.intencao = 'registrar_despesa';
-     } else if (messageLower.includes('seguro')) {
-       analysis.tipo = 'despesa_fixa';
-       analysis.categoria = 'seguro';
-       analysis.intencao = 'registrar_despesa';
-     }
-     // Identificar despesas variáveis por categoria
-     else if (messageLower.includes('comida') || messageLower.includes('restaurante') || messageLower.includes('supermercado')) {
-       analysis.tipo = 'despesa_variavel';
-       analysis.categoria = 'alimentacao';
-       analysis.intencao = 'registrar_despesa';
-     } else if (messageLower.includes('uber') || messageLower.includes('gasolina') || messageLower.includes('transporte')) {
-       analysis.tipo = 'despesa_variavel';
-       analysis.categoria = 'transporte';
-       analysis.intencao = 'registrar_despesa';
-     } else if (messageLower.includes('cinema') || messageLower.includes('lazer') || messageLower.includes('diversão')) {
-       analysis.tipo = 'despesa_variavel';
-       analysis.categoria = 'lazer';
+     // Identificar despesas (com contexto pessoal/empresarial)
+     else if (messageLower.includes('aluguel') || messageLower.includes('financiamento') || messageLower.includes('prestação') ||
+              messageLower.includes('seguro') || messageLower.includes('comida') || messageLower.includes('restaurante') ||
+              messageLower.includes('supermercado') || messageLower.includes('uber') || messageLower.includes('gasolina') ||
+              messageLower.includes('transporte') || messageLower.includes('cinema') || messageLower.includes('lazer') ||
+              messageLower.includes('diversão') || messageLower.includes('marketing') || messageLower.includes('fornecedor')) {
+       
+       // Determinar se é despesa pessoal ou empresarial
+       if (isBusinessContext) {
+         // Despesas empresariais
+         if (messageLower.includes('aluguel') && (messageLower.includes('loja') || messageLower.includes('escritório') || messageLower.includes('comercial'))) {
+           analysis.tipo = 'despesa_fixa';
+           analysis.categoria = 'aluguel';
+         } else if (messageLower.includes('marketing') || messageLower.includes('publicidade')) {
+           analysis.tipo = 'despesa_variavel';
+           analysis.categoria = 'marketing';
+         } else if (messageLower.includes('fornecedor')) {
+           analysis.tipo = 'despesa_variavel';
+           analysis.categoria = 'fornecedores';
+         } else {
+           analysis.tipo = 'despesa_variavel';
+           analysis.categoria = 'outros';
+         }
+       } else {
+         // Despesas pessoais (padrão para a maioria dos casos)
+         analysis.tipo = 'gasto_pessoal';
+         
+         // Categorias pessoais
+         if (messageLower.includes('aluguel') || messageLower.includes('financiamento') || messageLower.includes('prestação')) {
+           analysis.categoria = 'housing';
+         } else if (messageLower.includes('comida') || messageLower.includes('restaurante') || messageLower.includes('supermercado') ||
+                   messageLower.includes('mercado') || messageLower.includes('lanche') || messageLower.includes('feira')) {
+           analysis.categoria = 'food';
+         } else if (messageLower.includes('uber') || messageLower.includes('taxi') || messageLower.includes('gasolina') ||
+                   messageLower.includes('transporte') || messageLower.includes('ônibus') || messageLower.includes('metro')) {
+           analysis.categoria = 'transportation';
+         } else if (messageLower.includes('cinema') || messageLower.includes('lazer') || messageLower.includes('diversão') ||
+                   messageLower.includes('teatro') || messageLower.includes('show')) {
+           analysis.categoria = 'entertainment';
+         } else if (messageLower.includes('roupa') || messageLower.includes('sapato') || messageLower.includes('vestuário')) {
+           analysis.categoria = 'clothing';
+         } else if (messageLower.includes('médico') || messageLower.includes('farmácia') || messageLower.includes('hospital')) {
+           analysis.categoria = 'healthcare';
+         } else {
+           analysis.categoria = 'other';
+         }
+       }
+       
        analysis.intencao = 'registrar_despesa';
      }
      // Identificar investimentos
@@ -379,11 +420,19 @@ class GeminiService {
        analysis.categoria = 'aplicacao';
        analysis.intencao = 'registrar_investimento';
      }
-     // Identificar despesas genéricas
+     // Identificar despesas genéricas (com contexto)
      else if (messageLower.includes('gastei') || messageLower.includes('comprei') || messageLower.includes('paguei') ||
               messageLower.includes('gasto') || messageLower.includes('despesa') || messageLower.includes('saiu')) {
-       analysis.tipo = 'despesa_variavel';
-       analysis.categoria = 'outros'; // Garantir que categoria seja definida
+       
+       // Determinar contexto para despesas genéricas
+       if (isBusinessContext) {
+         analysis.tipo = 'despesa_variavel'; // Empresarial
+         analysis.categoria = 'outros';
+       } else {
+         analysis.tipo = 'gasto_pessoal'; // Pessoal (padrão)
+         analysis.categoria = 'other';
+       }
+       
        analysis.intencao = 'registrar_despesa';
        analysis.confianca = 0.8;
      }
@@ -394,6 +443,55 @@ class GeminiService {
      }
 
     return analysis;
+  }
+
+  /**
+   * Detectar se o contexto é empresarial
+   */
+  detectBusinessContext(messageLower) {
+    const businessKeywords = [
+      // Vendas e produtos
+      'vendi', 'venda', 'vendas', 'produto', 'cliente', 'comprador',
+      // Fornecedores e negócios
+      'fornecedor', 'supplier', 'empresa', 'negócio', 'negocio',
+      // Marketing e operações
+      'marketing', 'publicidade', 'propaganda', 'anúncio', 'anuncio',
+      // Locais comerciais
+      'loja', 'escritório', 'escritorio', 'comercial', 'empresarial',
+      // Termos específicos de negócio
+      'lucro', 'receita da empresa', 'despesa da empresa', 'cnpj',
+      'nota fiscal', 'faturamento', 'comissão', 'comissao'
+    ];
+    
+    return businessKeywords.some(keyword => messageLower.includes(keyword));
+  }
+
+  /**
+   * Detectar se o contexto é pessoal
+   */
+  detectPersonalContext(messageLower) {
+    const personalKeywords = [
+      // Vida pessoal
+      'casa', 'família', 'familia', 'pessoal', 'meu', 'minha',
+      // Alimentação pessoal
+      'supermercado', 'mercado', 'feira', 'padaria', 'açougue', 'acougue',
+      'restaurante', 'lanche', 'jantar', 'almoço', 'almoco', 'café', 'cafe',
+      // Transporte pessoal
+      'uber', 'taxi', '99', 'ônibus', 'onibus', 'metro', 'metrô',
+      'gasolina do carro', 'combustível do carro', 'combustivel do carro',
+      // Moradia pessoal
+      'aluguel de casa', 'aluguel da casa', 'conta de luz', 'conta de água', 'conta de agua',
+      'internet de casa', 'telefone pessoal',
+      // Saúde e cuidados
+      'médico', 'medico', 'farmácia', 'farmacia', 'remédio', 'remedio',
+      'dentista', 'hospital', 'plano de saúde', 'plano de saude',
+      // Lazer pessoal
+      'cinema', 'teatro', 'show', 'festa', 'viagem pessoal',
+      // Roupas e cuidados
+      'roupa', 'sapato', 'cabelo', 'salão', 'salao', 'barbeiro'
+    ];
+    
+    return personalKeywords.some(keyword => messageLower.includes(keyword));
   }
 
   // Construir prompt para análise financeira
@@ -428,24 +526,39 @@ Como analista financeiro, analise esta mensagem e extraia as seguintes informaç
 
 Regras importantes:
 - Use sempre as categorias predefinidas do sistema
-- Para receitas (salário, freelance, etc.), use TIPO "receita"
-- Para gastos fixos (aluguel, seguro, etc.), use TIPO "despesa_fixa"
-- Para gastos variáveis (alimentação, lazer, etc.), use TIPO "despesa_variavel"
+- Para receitas empresariais (vendas, comissões), use TIPO "receita"
+- Para receitas pessoais (salário, freelance), use TIPO "receita_pessoal"
+- Para gastos empresariais fixos (aluguel comercial, seguro empresarial), use TIPO "despesa_fixa"
+- Para gastos empresariais variáveis (marketing, fornecedores), use TIPO "despesa_variavel"
+- Para gastos pessoais (alimentação, moradia, transporte pessoal), use TIPO "gasto_pessoal"
 - Para investimentos, use TIPO "investimento"
 - Para consultas, use TIPO "consulta"
 - VALOR deve ser apenas o número (ex: 50.00, não "R$ 50")
 - Forneça análise e dicas como um consultor financeiro experiente
 
+**IMPORTANTE**: Diferencie entre gastos empresariais e pessoais:
+- Empresariais: relacionados ao negócio, vendas, produtos, fornecedores
+- Pessoais: relacionados à vida pessoal, família, casa, alimentação pessoal
+
 Exemplos:
-- "Recebi meu salário de 5000 reais" → TIPO: receita, CATEGORIA: salario
-- "Paguei o aluguel de 1200 reais" → TIPO: despesa_fixa, CATEGORIA: aluguel
-- "Gastei 80 reais no supermercado" → TIPO: despesa_variavel, CATEGORIA: alimentacao
+**Empresariais:**
+- "Vendi um produto por 200 reais" → TIPO: receita, CATEGORIA: vendas
+- "Paguei o aluguel da loja de 1200 reais" → TIPO: despesa_fixa, CATEGORIA: aluguel
+- "Gastei 300 reais em marketing" → TIPO: despesa_variavel, CATEGORIA: marketing
+
+**Pessoais:**
+- "Recebi meu salário de 5000 reais" → TIPO: receita_pessoal, CATEGORIA: salary
+- "Paguei o aluguel de casa de 800 reais" → TIPO: gasto_pessoal, CATEGORIA: housing
+- "Gastei 80 reais no supermercado" → TIPO: gasto_pessoal, CATEGORIA: food
+- "Paguei 50 reais de uber" → TIPO: gasto_pessoal, CATEGORIA: transportation
+
+**Outros:**
 - "Investi 500 reais na poupança" → TIPO: investimento, CATEGORIA: aplicacao
 - "Quanto gastei este mês?" → TIPO: consulta, INTENÇÃO: consultar_gastos_mes
 
 Responda APENAS com um JSON válido no seguinte formato:
 {
-  "tipo": "receita|despesa_fixa|despesa_variavel|investimento|consulta|outros",
+  "tipo": "receita|receita_pessoal|despesa_fixa|despesa_variavel|gasto_pessoal|investimento|consulta|outros",
   "valor": 0.00,
   "categoria": "categoria_do_sistema",
   "descricao": "descrição detalhada",
@@ -454,7 +567,9 @@ Responda APENAS com um JSON válido no seguinte formato:
   "confianca": 0.95,
   "analise": "breve análise do impacto",
   "dica": "sugestão personalizada",
-  "produto_nome": "nome_do_produto_se_aplicavel"
+  "produto_nome": "nome_do_produto_se_aplicavel",
+  "metodo_pagamento": "cash|debit_card|credit_card|pix|bank_transfer",
+  "fonte": "fonte_da_receita_se_aplicavel"
 }
 `;
   }

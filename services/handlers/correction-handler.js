@@ -251,19 +251,30 @@ class CorrectionHandler extends BaseHandler {
     const { descricao, valor, intencao } = analysisResult;
     const hasPendingCorrection = this.pendingCorrections.has(userId);
     
-    // Palavras-chave de correção
-    const correctionKeywords = [
+    // Se não há correção pendente, não é correção
+    if (!hasPendingCorrection) {
+      return false;
+    }
+    
+    // Palavras-chave explícitas de correção
+    const explicitCorrectionKeywords = [
       'foi', 'era', 'na verdade', 'correto', 'certo', 'errado',
       'mudança', 'mudar', 'alterar', 'corrigir', 'correção',
-      'não', 'nao', 'sim', 'isso', 'aquilo'
+      'não é', 'nao é', 'não era', 'nao era'
     ];
     
     const text = descricao?.toLowerCase() || '';
-    const hasKeyword = correctionKeywords.some(keyword => text.includes(keyword));
-    const hasLowValue = valor === 0 || !valor;
-    const isNotTransaction = intencao !== 'registrar_despesa' && intencao !== 'registrar_receita';
+    const hasExplicitKeyword = explicitCorrectionKeywords.some(keyword => text.includes(keyword));
     
-    return hasPendingCorrection && (hasKeyword || (hasLowValue && isNotTransaction));
+    // Verificar se é uma categoria simples (uma palavra só) com valor baixo
+    const isSingleWord = text.trim().split(' ').length === 1;
+    const hasLowValue = valor === 0 || !valor;
+    const isCategory = this.mapCategory(text) !== null;
+    
+    // É correção se:
+    // 1. Tem palavra-chave explícita de correção OU
+    // 2. É uma única palavra que mapeia para categoria E tem valor baixo/zero
+    return hasExplicitKeyword || (isSingleWord && isCategory && hasLowValue);
   }
 
   /**
