@@ -337,29 +337,85 @@ class QueryHandler extends BaseHandler {
   }
 
   /**
-   * Obter resumo financeiro completo
+   * Obter resumo financeiro completo (pessoal + empresarial)
    * @param {string} userId - ID do usuário
-   * @returns {Promise<string>} - Resumo financeiro
+   * @returns {Promise<string>} - Resumo financeiro integrado
    */
   async getFinancialSummary(userId) {
     try {
-      const userContext = await this.getUserContext(userId);
+      // Buscar dados financeiros pessoais
       const transactions = await this.databaseService.getUserTransactions(userId, 1000);
       
-      const totalTransactions = transactions.length;
-      const totalSpent = Math.abs(transactions.filter(t => t.amount < 0).reduce((sum, t) => sum + t.amount, 0));
-      const totalIncome = transactions.filter(t => t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
-      const balance = totalIncome - totalSpent;
+      // Buscar dados de vendas/empresariais
+      let salesData = [];
+      try {
+        const revenues = await this.databaseService.getRevenues(userId, 100);
+        salesData = revenues || [];
+      } catch (error) {
+        console.log('⚠️ Erro ao buscar receitas de vendas:', error.message);
+      }
       
-      const summary = {
-        totalTransactions,
-        totalSpent,
-        totalIncome,
-        monthlySpent: userContext.monthlySpent || 0,
-        topCategories: userContext.topCategories || []
-      };
+      // Calcular totais pessoais
+      const personalTransactions = transactions.filter(t => !t.source || t.source !== 'vendas_ai');
+      const personalSpent = Math.abs(personalTransactions.filter(t => t.amount < 0).reduce((sum, t) => sum + t.amount, 0));
+      const personalIncome = personalTransactions.filter(t => t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
       
-      return ResponseFormatter.formatTransactionSummary(summary);
+      // Calcular totais empresariais (vendas)
+      const businessIncome = salesData.reduce((sum, sale) => sum + (sale.amount || 0), 0);
+      
+      // Totais gerais
+      const totalTransactions = transactions.length + salesData.length;
+      const totalIncome = personalIncome + businessIncome;
+      const balance = totalIncome - personalSpent;
+      
+      let response = `📊 **Resumo Financeiro Completo**\n\n`;
+      response += `📈 **Total de transações:** ${totalTransactions}\n`;
+      response += `💸 **Total gasto:** R$ ${personalSpent.toFixed(2)}\n`;
+      response += `💰 **Total recebido:** R$ ${totalIncome.toFixed(2)}\n`;
+      
+      // Separar por tipo
+      if (personalIncome > 0 || businessIncome > 0) {
+        response += `\n💼 **Detalhamento:**\n`;
+        if (personalIncome > 0) {
+          response += `• Receitas pessoais: R$ ${personalIncome.toFixed(2)}\n`;
+        }
+        if (businessIncome > 0) {
+          response += `• Receitas de vendas: R$ ${businessIncome.toFixed(2)}\n`;
+        }
+      }
+      
+      // Calcular gastos do mês atual
+      const thisMonth = new Date();
+      thisMonth.setDate(1);
+      thisMonth.setHours(0, 0, 0, 0);
+      
+      const monthlyExpenses = personalTransactions.filter(t => 
+        new Date(t.date) >= thisMonth && t.amount < 0
+      );
+      const monthlySpent = Math.abs(monthlyExpenses.reduce((sum, t) => sum + t.amount, 0));
+      
+      response += `📅 **Gasto este mês:** R$ ${monthlySpent.toFixed(2)}\n`;
+      
+      // Top categorias
+      if (personalTransactions.length > 0) {
+        const expensesByCategory = this.groupTransactionsByCategory(
+          personalTransactions.filter(t => t.amount < 0)
+        );
+        
+        response += `\n🏆 **Top categorias:**\n`;
+        Object.entries(expensesByCategory)
+          .sort(([,a], [,b]) => Math.abs(b.total) - Math.abs(a.total))
+          .slice(0, 3)
+          .forEach(([category, data], index) => {
+            response += `${index + 1}. ${ResponseFormatter.formatCategory(category)}: R$ ${Math.abs(data.total).toFixed(2)}\n`;
+          });
+      }
+      
+      // Saldo final
+      const balanceIcon = balance >= 0 ? '✅' : '⚠️';
+      response += `\n${balanceIcon} **Saldo:** R$ ${balance.toFixed(2)}`;
+      
+      return response;
       
     } catch (error) {
       console.error('❌ Erro ao obter resumo financeiro:', error);

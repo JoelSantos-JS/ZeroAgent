@@ -134,8 +134,10 @@ class FinancialAgent {
         body: sanitizedBody
       });
       
-      // Adicionar ao histórico de conversação
-      this.addToConversationHistory(message.from, message.body, 'user');
+      // Adicionar ao histórico de conversação (exceto placeholders de mídia)
+      if (message.body !== '[IMAGEM]' && message.body !== '[ÁUDIO]') {
+        this.addToConversationHistory(message.from, message.body, 'user');
+      }
       
       // Verificar se é mensagem de áudio
       if (message.hasMedia && message.type === 'audio') {
@@ -456,7 +458,8 @@ class FinancialAgent {
       const user = authStatus.user;
       
       // Verificar se há texto junto com a imagem (venda direta)
-      const hasCaption = message.body && message.body.trim().length > 0;
+      // Ignorar placeholder '[IMAGEM]' criado pelo WhatsApp service
+      const hasCaption = message.body && message.body.trim().length > 0 && message.body.trim() !== '[IMAGEM]';
       
       if (hasCaption) {
         console.log('📸 Imagem com descrição detectada:', message.body);

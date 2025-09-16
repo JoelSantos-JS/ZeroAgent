@@ -238,6 +238,12 @@ class GeminiService {
       await this.initialize();
     }
 
+    // Verificar se está incorretamente em modo offline quando deveria estar online
+    if (this.offlineMode && this.apiKeys.length > 0) {
+      console.log('⚠️ Detectado modo offline incorreto, tentando reinicializar...');
+      await this.forceReinitialize();
+    }
+
     try {
       // Verificar se está em modo offline
       if (this.offlineMode) {
@@ -414,8 +420,19 @@ class GeminiService {
       analysis.valor = parseFloat(valorMatch[0].replace(',', '.'));
     }
 
-    // Primeiro verificar se é consulta (prioridade alta)
-     if (messageLower.includes('quanto') || messageLower.includes('quais') || messageLower.includes('relatório') || 
+    // Primeiro verificar se é consulta de estoque (prioridade alta)
+    if (messageLower.includes('estoque') || messageLower.includes('consultar estoque') || 
+        messageLower.includes('ver estoque') || messageLower.includes('verificar estoque') ||
+        messageLower.includes('listar produtos') || messageLower.includes('produtos disponíveis') ||
+        messageLower.includes('produtos disponiveis')) {
+      analysis.tipo = 'consulta';
+      analysis.intencao = 'consultar_estoque';
+      analysis.categoria = 'consulta';
+      analysis.confianca = 0.95;
+      analysis.dica = 'Vou buscar informações do seu estoque!';
+    }
+    // Verificar outras consultas financeiras
+    else if (messageLower.includes('quanto') || messageLower.includes('quais') || messageLower.includes('relatório') || 
          messageLower.includes('consulta') || messageLower.includes('gastos') || messageLower.includes('receitas') ||
          messageLower.includes('saldo') || messageLower.includes('extrato') || messageLower.includes('resumo') ||
          messageLower.includes('meus gastos') || messageLower.includes('minhas receitas') || messageLower.includes('balanço') ||
