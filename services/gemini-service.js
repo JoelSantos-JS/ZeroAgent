@@ -1,12 +1,15 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const logger = require('../utils/logger');
 const { FINANCIAL_ANALYST_PROMPT, CATEGORIES, RESPONSE_TEMPLATES } = require('../prompts/financial-analyst-prompt');
+const ImageProcessor = require('./image-processor');
 require('dotenv').config();
 
 class GeminiService {
   constructor() {
     this.genAI = null;
     this.model = null;
+    this.visionModel = null;
+    this.imageProcessor = null;
     this.isInitialized = false;
     this.offlineMode = false;
     this.currentKeyIndex = 0;
@@ -50,6 +53,16 @@ class GeminiService {
     try {
       console.log('🤖 Inicializando Gemini AI...');
       
+      // Recarregar variáveis de ambiente
+      require('dotenv').config();
+      
+      // Reconfigurar chaves API
+      this.apiKeys = [];
+      if (process.env.GEMINI_API_KEY) {
+        this.apiKeys.push(process.env.GEMINI_API_KEY);
+        console.log('🔑 Chave API Gemini encontrada!');
+      }
+      
       if (this.apiKeys.length === 0) {
         console.warn('⚠️ Nenhuma chave API encontrada, usando modo offline');
         this.offlineMode = true;
@@ -73,6 +86,21 @@ class GeminiService {
               maxOutputTokens: 1024
             }
           });
+          
+          // Inicializar modelo de visão
+          this.visionModel = this.genAI.getGenerativeModel({
+            model: 'gemini-1.5-flash',
+            generationConfig: {
+              temperature: 0.3,
+              topK: 40,
+              topP: 0.95,
+              maxOutputTokens: 1024
+            }
+          });
+          
+          // Inicializar processador de imagem
+          this.imageProcessor = new ImageProcessor(null, this);
+          await this.imageProcessor.initialize();
           
           // Testar conexão
           await this.testConnection();
@@ -120,6 +148,88 @@ class GeminiService {
     } catch (error) {
       throw new Error('Falha no teste de conexão com Gemini: ' + error.message);
     }
+  }
+
+  /**
+   * Processar imagem de produto para reconhecimento
+   * @param {Buffer} imageBuffer - Buffer da imagem
+   * @param {Object} userContext - Contexto do usuário
+   * @returns {Promise<Object>} - Resultado do reconhecimento
+   */
+  async processProductImage(imageBuffer, userContext = {}) {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+    
+    if (this.offlineMode) {
+      return this.getOfflineImageAnalysis(imageBuffer);
+    }
+    
+    try {
+      console.log('📸 Processando imagem de produto com Gemini Vision...');
+      
+      // Usar o image processor para análise
+       const result = await this.imageProcessor.processImage(imageBuffer, {
+         userContext,
+         userId: userContext.userId,
+         databaseService: userContext.databaseService
+       });
+      
+      if (result.success) {
+        logger.info('Imagem processada com sucesso', {
+          produto: result.productData.produto_nome,
+          confianca: result.productData.confianca,
+          processingTime: result.processingTime
+        });
+        
+        return result.productData;
+      } else {
+        throw new Error(result.error || 'Falha no processamento da imagem');
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro ao processar imagem:', error);
+      logger.error('Erro no processamento de imagem', {
+        error: error.message,
+        userId: userContext.userId
+      });
+      
+      // Tentar próxima chave API se disponível
+      if (error.message.includes('API') && this.apiKeys.length > 1) {
+        const switched = await this.tryNextApiKey();
+        if (switched) {
+          return this.processProductImage(imageBuffer, userContext);
+        }
+      }
+      
+      // Fallback para análise offline
+      return this.getOfflineImageAnalysis(imageBuffer);
+    }
+  }
+
+  /**
+   * Análise offline de imagem (fallback)
+   * @param {Buffer} imageBuffer - Buffer da imagem
+   * @returns {Object} - Resultado básico da análise
+   */
+  getOfflineImageAnalysis(imageBuffer) {
+    console.log('🔄 Processando imagem em modo offline...');
+    
+    return {
+      tipo: 'produto',
+      valor: 0,
+      categoria: 'outros',
+      descricao: 'Produto identificado por imagem (modo offline)',
+      data: 'hoje',
+      intencao: 'registrar_produto',
+      confianca: 0.3,
+      analise: 'Análise básica - modo offline',
+      dica: 'Para melhor reconhecimento, conecte-se à internet',
+      produto_nome: 'Produto não identificado',
+      produto_categoria: 'outros',
+      produto_preco_estimado: null,
+      fonte: 'offline_analysis'
+    };
   }
 
   // Processar mensagem financeira
@@ -899,6 +1009,29 @@ Use emojis apropriados e mantenha um tom amigável.
       optimization: this.audioConfig.optimization,
       presets: ['aggressive', 'balanced', 'conservative', 'quality']
     };
+  }
+
+  /**
+   * Forçar reinicialização e sair do modo offline
+   */
+  async forceReinitialize() {
+    console.log('🔄 Forçando reinicialização do Gemini...');
+    this.isInitialized = false;
+    this.offlineMode = false;
+    this.genAI = null;
+    this.model = null;
+    this.visionModel = null;
+    this.imageProcessor = null;
+    
+    await this.initialize();
+    
+    if (!this.offlineMode) {
+      console.log('✅ Gemini reinicializado com sucesso!');
+    } else {
+      console.log('⚠️ Ainda em modo offline após reinicialização');
+    }
+    
+    return !this.offlineMode;
   }
 }
 

@@ -16,6 +16,10 @@ class SalesHandler extends BaseHandler {
     this.lastSyncTimes = new Map(); // Por usuário
     this.isRunning = false;
     
+    // Cache de contexto de produtos identificados por imagem
+    this.imageProductContext = new Map(); // userId -> productData
+    this.contextTimeout = 5 * 60 * 1000; // 5 minutos
+    
     // Métricas de performance
     this.metrics = {
       totalSalesProcessed: 0,
@@ -289,7 +293,12 @@ class SalesHandler extends BaseHandler {
    */
   async process(userId, analysisResult) {
     try {
-      const { descricao, intencao } = analysisResult;
+      const { descricao, intencao, tipo, produto_nome, fonte } = analysisResult;
+      
+      // Verificar se é produto identificado por imagem
+      if (tipo === 'venda' && produto_nome && fonte === 'banco_dados') {
+        return await this.handleImageProductSale(userId, analysisResult);
+      }
       
       // Verificar se é resposta a sugestão de produto (número)
       if (this.isProductSuggestionResponse(descricao)) {
@@ -304,6 +313,11 @@ class SalesHandler extends BaseHandler {
       // Verificar se é comando de sincronização
       if (this.isSyncCommand(descricao, intencao)) {
         return await this.handleSyncCommand(userId);
+      }
+      
+      // Verificar se é confirmação de venda de produto identificado por imagem
+      if (this.isImageSaleConfirmation(descricao)) {
+        return await this.handleImageSaleConfirmation(userId, analysisResult);
       }
       
       // Verificar se é registro de venda manual
@@ -367,6 +381,178 @@ class SalesHandler extends BaseHandler {
            `Para usar as sugestões, primeiro faça uma venda que não encontre o produto.\n` +
            `Exemplo: "Vendi kz por 85 reais"`;
   }
+
+  /**
+   * Processar venda de produto identificado por imagem
+   * @param {string} userId - ID do usuário
+   * @param {Object} analysisResult - Resultado da análise de imagem
+   * @returns {Promise<string>} - Resposta formatada
+   */
+  async handleImageProductSale(userId, analysisResult) {
+    try {
+      const { produto_nome, produto_id, valor, confianca, similaridade } = analysisResult;
+      
+      console.log('🛒 Processando venda de produto identificado por imagem:', {
+        produto: produto_nome,
+        confianca,
+        similaridade
+      });
+      
+      // Buscar dados completos do produto no banco
+      let product = null;
+      if (produto_id) {
+        const products = await this.databaseService.getUserProducts(userId, 100);
+        product = products.find(p => p.id === produto_id);
+      }
+      
+      if (!product) {
+        // Buscar por nome se não encontrou por ID
+        const products = await this.databaseService.getUserProducts(userId, 100);
+        product = products.find(p => 
+          (p.name && p.name.toLowerCase().includes(produto_nome.toLowerCase())) ||
+          (p.product_name && p.product_name.toLowerCase().includes(produto_nome.toLowerCase()))
+        );
+      }
+      
+      if (!product) {
+        return `❌ **Produto não encontrado no banco de dados**\n\n` +
+               `📸 Identifiquei: **${produto_nome}**\n` +
+               `⚠️ Confiança: ${(confianca * 100).toFixed(0)}%\n\n` +
+               `💡 *O produto precisa estar cadastrado para registrar vendas.*`;
+      }
+      
+      // Verificar se tem preço cadastrado
+       const sellingPrice = product.selling_price || product.price || valor;
+       
+       // Salvar contexto do produto para próxima interação
+       this.saveImageProductContext(userId, {
+         product: product,
+         sellingPrice: sellingPrice,
+         confianca: confianca,
+         produto_nome: produto_nome
+       });
+       
+       if (sellingPrice && sellingPrice > 0) {
+         // Produto tem preço - sugerir preço cadastrado
+         return `✅ **${product.name || product.product_name}** identificado!\n\n` +
+                `📊 **Confiança:** ${(confianca * 100).toFixed(0)}%\n` +
+                `💰 **Preço cadastrado:** R$ ${sellingPrice.toFixed(2)}\n\n` +
+                `❓ **Foi vendido por R$ ${sellingPrice.toFixed(2)}?**\n\n` +
+                `• Digite "sim" ou "ok" para confirmar\n` +
+                `• Digite o valor real da venda (ex: 85.00)\n` +
+                `• Digite "não" para cancelar`;
+       } else {
+         // Produto sem preço - solicitar valor
+         return `✅ **${product.name || product.product_name}** identificado!\n\n` +
+                `📊 **Confiança:** ${(confianca * 100).toFixed(0)}%\n\n` +
+                `💰 **Qual foi o valor da venda?**\n` +
+                `💡 *Digite o valor em reais (ex: 89.90)*`;
+       }
+      
+    } catch (error) {
+       console.error('❌ Erro ao processar venda de imagem:', error);
+       return '❌ Erro ao processar venda do produto identificado. Tente novamente.';
+     }
+   }
+
+   /**
+    * Verificar se é confirmação de venda de produto identificado por imagem
+    * @param {string} descricao - Descrição da mensagem
+    * @returns {boolean}
+    */
+   isImageSaleConfirmation(descricao, userId) {
+     if (!descricao || !userId) return false;
+     
+     // PRIMEIRO: Verificar se há contexto de venda ativo
+      const context = this.imageProductContext.get(userId);
+      if (!context) return false; // Sem contexto, não é confirmação de venda
+      
+      // Verificar se não expirou
+      const elapsed = Date.now() - context.timestamp;
+      if (elapsed > this.contextTimeout) {
+        this.imageProductContext.delete(userId);
+        return false;
+      }
+     
+     const text = descricao.toLowerCase().trim();
+     
+     // Verificar confirmações
+     const confirmations = ['sim', 'ok', 'confirmar', 'confirmo', 'yes'];
+     if (confirmations.includes(text)) return true;
+     
+     // Verificar valores monetários (incluindo "reais", "R$", etc.)
+      const pricePattern = /^\d+([.,]\d{1,2})?\s*(reais?|r\$?)?$/i;
+      if (pricePattern.test(text.replace(',', '.'))) return true;
+      
+      // Verificar padrões alternativos como "R$ 70", "70.00 reais", etc.
+      const altPricePattern = /(r\$?\s*)?\d+([.,]\d{1,2})?(\s*(reais?|r\$?))?/i;
+      if (altPricePattern.test(text)) return true;
+     
+     // Verificar negações
+     const negations = ['não', 'nao', 'no', 'cancelar', 'cancel'];
+     if (negations.includes(text)) return true;
+     
+     return false;
+   }
+
+   /**
+    * Processar confirmação de venda de produto identificado por imagem
+    * @param {string} userId - ID do usuário
+    * @param {Object} analysisResult - Resultado da análise
+    * @returns {Promise<string>} - Resposta formatada
+    */
+   async handleImageSaleConfirmation(userId, analysisResult) {
+     try {
+       const { descricao } = analysisResult;
+       const text = descricao.toLowerCase().trim();
+       
+       console.log('🔄 Processando confirmação de venda por imagem:', text);
+       
+       // Verificar se é cancelamento
+       const negations = ['não', 'nao', 'no', 'cancelar', 'cancel'];
+       if (negations.includes(text)) {
+         return '❌ **Venda cancelada**\n\n💡 *Envie uma nova foto quando quiser registrar uma venda.*';
+       }
+       
+       // Buscar último produto identificado por imagem no contexto do usuário
+        const lastImageProduct = await this.getLastImageProductContext(userId);
+        
+        if (!lastImageProduct) {
+          return '❌ **Contexto perdido**\n\n' +
+                 '💡 *Envie a foto do produto novamente para registrar a venda.*';
+        }
+        
+        const confirmations = ['sim', 'ok', 'confirmar', 'confirmo', 'yes'];
+        if (confirmations.includes(text)) {
+          // Confirmar com preço cadastrado
+          const salePrice = lastImageProduct.sellingPrice;
+          return await this.registerImageSale(userId, lastImageProduct, salePrice);
+        }
+        
+        // Verificar se é um valor monetário
+        const pricePattern = /^\d+([.,]\d{1,2})?$/;
+        if (pricePattern.test(text.replace(',', '.'))) {
+          const price = parseFloat(text.replace(',', '.'));
+          
+          if (price <= 0) {
+            return '❌ **Valor inválido**\n\n💡 *Digite um valor maior que zero (ex: 89.90)*';
+          }
+          
+          // Registrar com preço informado pelo usuário
+          return await this.registerImageSale(userId, lastImageProduct, price);
+        }
+       
+       return '❓ **Não entendi sua resposta**\n\n' +
+              'Responda com:\n' +
+              '• "sim" ou "ok" para confirmar o preço\n' +
+              '• O valor da venda (ex: 85.00)\n' +
+              '• "não" para cancelar';
+       
+     } catch (error) {
+       console.error('❌ Erro ao processar confirmação:', error);
+       return '❌ Erro ao processar confirmação. Tente novamente.';
+     }
+   }
   
   /**
    * Processar comando de criação de produto
@@ -1647,6 +1833,124 @@ class SalesHandler extends BaseHandler {
       syncInterval: this.syncInterval,
       metrics: this.getMetrics()
     };
+  }
+
+  /**
+   * Salvar contexto de produto identificado por imagem
+   * @param {string} userId - ID do usuário
+   * @param {Object} productData - Dados do produto
+   */
+  saveImageProductContext(userId, productData) {
+    this.imageProductContext.set(userId, {
+      ...productData,
+      timestamp: Date.now()
+    });
+    
+    // Limpar contexto após timeout
+    setTimeout(() => {
+      this.imageProductContext.delete(userId);
+    }, this.contextTimeout);
+    
+    console.log('💾 Contexto de produto salvo para usuário:', userId);
+  }
+
+  /**
+   * Obter último produto identificado por imagem
+   * @param {string} userId - ID do usuário
+   * @returns {Object|null} - Dados do produto ou null
+   */
+  async getLastImageProductContext(userId) {
+    const context = this.imageProductContext.get(userId);
+    
+    if (!context) {
+      return null;
+    }
+    
+    // Verificar se não expirou
+    const elapsed = Date.now() - context.timestamp;
+    if (elapsed > this.contextTimeout) {
+      this.imageProductContext.delete(userId);
+      return null;
+    }
+    
+    return context;
+  }
+
+  /**
+   * Registrar venda de produto identificado por imagem
+   * @param {string} userId - ID do usuário
+   * @param {Object} productContext - Contexto do produto
+   * @param {number} salePrice - Preço da venda
+   * @returns {Promise<string>} - Resposta formatada
+   */
+  async registerImageSale(userId, productContext, salePrice) {
+    try {
+      const { product, produto_nome, confianca } = productContext;
+      
+      console.log('💰 Registrando venda por imagem:', {
+        produto: produto_nome,
+        preco: salePrice,
+        usuario: userId
+      });
+      
+      // Registrar como receita no sistema financeiro
+      await this.databaseService.createRevenue(
+        userId,
+        salePrice,
+        'vendas',
+        `Venda: ${produto_nome} (identificado por IA)`,
+        new Date(),
+        'vendas_ai'
+      );
+      
+      // Atualizar métricas
+      this.metrics.totalSalesProcessed++;
+      this.metrics.totalRevenue += salePrice;
+      
+      // Limpar contexto após registro
+      this.imageProductContext.delete(userId);
+      
+      // Calcular lucro se houver preço de custo
+      const costPrice = product.cost_price || 0;
+      const profit = costPrice > 0 ? salePrice - costPrice : null;
+      const margin = profit && costPrice > 0 ? ((profit / salePrice) * 100) : null;
+      
+      let response = `✅ **Venda Registrada com Sucesso!**\n\n`;
+      response += `🛒 **Produto:** ${produto_nome}\n`;
+      response += `💰 **Valor:** R$ ${salePrice.toFixed(2)}\n`;
+      response += `📊 **Confiança IA:** ${(confianca * 100).toFixed(0)}%\n`;
+      
+      if (profit !== null) {
+        response += `\n💹 **Análise Financeira:**\n`;
+        response += `• **Custo:** R$ ${costPrice.toFixed(2)}\n`;
+        response += `• **Lucro:** R$ ${profit.toFixed(2)}\n`;
+        if (margin !== null) {
+          response += `• **Margem:** ${margin.toFixed(1)}%\n`;
+        }
+      }
+      
+      response += `\n📅 **Data:** ${new Date().toLocaleDateString('pt-BR')}\n`;
+      response += `🤖 **Método:** Reconhecimento por IA`;
+      
+      logger.info('Venda por imagem registrada', {
+        userId,
+        produto: produto_nome,
+        valor: salePrice,
+        confianca
+      });
+      
+      return response;
+      
+    } catch (error) {
+      console.error('❌ Erro ao registrar venda por imagem:', error);
+      logger.error('Erro no registro de venda por imagem', {
+        userId,
+        error: error.message
+      });
+      
+      return '❌ **Erro ao registrar venda**\n\n' +
+             'Ocorreu um erro ao salvar a transação. Tente novamente ou registre manualmente.';
+    }
   }
 }
 

@@ -391,6 +391,20 @@ class WhatsAppService {
       return;
     }
     
+    // Verificar se é mensagem de imagem
+    if (message.hasMedia && message.type === 'image') {
+      console.log(`📸 Imagem recebida de ${message.from}`);
+      logger.info('Imagem recebida', {
+        from: message.from,
+        type: message.type,
+        timestamp: message.timestamp
+      });
+      
+      // Processar imagem
+      await this.handleImageMessage(message);
+      return;
+    }
+    
     // Log sanitizado para proteger senhas
     const sanitizedBody = this.sanitizeMessageForLog(message.body);
     logger.info('Mensagem recebida', {
@@ -483,6 +497,79 @@ class WhatsAppService {
         errorMessage += 'Formato de áudio não suportado. Use MP3, WAV ou OGG.';
       } else {
         errorMessage += 'Tente novamente ou digite sua transação.';
+      }
+      
+      await this.sendMessage(message.from, errorMessage);
+    }
+  }
+
+  // Processar mensagem de imagem
+  async handleImageMessage(message) {
+    try {
+      console.log('🔄 Processando imagem...');
+      
+      // Enviar mensagem de confirmação
+      await this.sendMessage(message.from, '📸 Imagem recebida! Analisando produto...');
+      
+      // Baixar imagem
+      const media = await message.downloadMedia();
+      
+      if (!media) {
+        throw new Error('Falha ao baixar imagem');
+      }
+      
+      // Validar tamanho do arquivo
+      const maxSize = 20 * 1024 * 1024; // 20MB
+      if (media.data && Buffer.from(media.data, 'base64').length > maxSize) {
+        await this.sendMessage(message.from, '❌ Imagem muito grande. Por favor, envie uma imagem menor que 20MB.');
+        return;
+      }
+      
+      // Converter base64 para buffer
+      const imageBuffer = Buffer.from(media.data, 'base64');
+      
+      console.log('📁 Imagem baixada:', {
+        size: `${(imageBuffer.length / 1024).toFixed(2)}KB`,
+        mimetype: media.mimetype
+      });
+      
+      // Criar mensagem simulada para processamento
+      const imageMessage = {
+        ...message,
+        hasImage: true,
+        imageBuffer: imageBuffer,
+        imageMimetype: media.mimetype,
+        body: '[IMAGEM]' // Placeholder para identificação
+      };
+      
+      // Processar com o processador de mensagens
+      if (this.messageProcessor) {
+        const response = await this.messageProcessor.processMessage(imageMessage);
+        if (response) {
+          await this.sendMessage(message.from, response);
+        }
+      } else {
+        await this.sendMessage(message.from, '❌ Processador de imagem não configurado.');
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro ao processar imagem:', error);
+      logger.error('Erro no processamento de imagem', {
+        from: message.from,
+        error: error.message
+      });
+      
+      // Mensagens de erro específicas
+      let errorMessage = '❌ Erro ao processar imagem. ';
+      
+      if (error.message.includes('Falha ao baixar')) {
+        errorMessage += 'Não consegui baixar a imagem. Tente enviar novamente.';
+      } else if (error.message.includes('muito grande')) {
+        errorMessage += 'Imagem muito grande. Envie uma imagem menor que 20MB.';
+      } else if (error.message.includes('formato')) {
+        errorMessage += 'Formato de imagem não suportado. Use JPG, PNG ou WebP.';
+      } else {
+        errorMessage += 'Tente novamente ou digite o nome do produto.';
       }
       
       await this.sendMessage(message.from, errorMessage);

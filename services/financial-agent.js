@@ -142,6 +142,11 @@ class FinancialAgent {
         return await this.processAudioMessage(message);
       }
       
+      // Verificar se é mensagem de imagem
+      if (message.hasMedia && message.type === 'image') {
+        return await this.processImageMessage(message);
+      }
+      
       // Processar mensagem de texto
       return await this.processTextMessage(message);
       
@@ -181,7 +186,18 @@ class FinancialAgent {
     console.log('🔍 Verificando autenticação para:', message.from);
     console.log('👤 Usuário existente encontrado:', user.email);
     
-    // Analisar contexto da conversa
+    // PRIORIDADE 1: Verificar se há contexto de venda ativo
+    const salesHandler = this.handlers.sales;
+    if (salesHandler && salesHandler.isImageSaleConfirmation) {
+      const isImageSaleResponse = salesHandler.isImageSaleConfirmation(message.body, user.id);
+      if (isImageSaleResponse) {
+        console.log('🛒 Detectado resposta de venda por imagem, processando...');
+        const salesResponse = await salesHandler.handleImageSaleConfirmation(user.id, { descricao: message.body });
+        return salesResponse;
+      }
+    }
+    
+    // PRIORIDADE 2: Analisar contexto da conversa
     const contextAnalysis = this.analyzeConversationContext(message.from, message.body);
     
     let analysisResult;
@@ -248,6 +264,10 @@ class FinancialAgent {
       const { tipo } = analysisResult;
       
       switch (tipo) {
+        case 'venda':
+        case 'produto':
+          return await this.handlers.sales.process(userId, analysisResult);
+          
         case 'receita':
           return await this.handlers.income.process(userId, analysisResult);
           
@@ -414,6 +434,102 @@ class FinancialAgent {
     } catch (error) {
       console.error('❌ Erro no processamento de áudio:', error);
       return '❌ Erro ao processar áudio. Tente enviar uma mensagem de texto.';
+    }
+  }
+
+  /**
+   * Processar mensagem de imagem
+   * @param {Object} message - Mensagem do WhatsApp com imagem
+   * @returns {Promise<string>} - Resposta para o usuário
+   */
+  async processImageMessage(message) {
+    try {
+      console.log('📸 Iniciando processamento de imagem...');
+      
+      // Verificar autenticação
+      const authStatus = await this.checkUserAuthentication(message.from);
+      
+      if (!authStatus.isAuthenticated) {
+        return '🔐 Por favor, faça login primeiro antes de enviar imagens. Digite seu email para começar.';
+      }
+      
+      const user = authStatus.user;
+      
+      // Verificar se há texto junto com a imagem (venda direta)
+      const hasCaption = message.body && message.body.trim().length > 0;
+      
+      if (hasCaption) {
+        console.log('📸 Imagem com descrição detectada:', message.body);
+        
+        // Processar como venda direta com imagem
+        const salesHandler = this.handlers.sales;
+        if (salesHandler) {
+          try {
+            // Primeiro, identificar o produto na imagem
+            const userContext = await this.getUserContext(user.id);
+            const imageResult = await geminiService.processProductImage(message.imageBuffer, {
+              userId: user.id,
+              phoneNumber: message.from,
+              userContext: userContext,
+              databaseService: databaseService
+            });
+            
+            if (imageResult && imageResult.produto_nome) {
+              console.log('✅ Produto identificado na imagem:', imageResult.produto_nome);
+              
+              // Processar texto como venda com produto identificado
+              const analysisResult = await geminiService.processFinancialMessage(message.body, userContext);
+              analysisResult.produto_identificado = imageResult.produto_nome;
+              analysisResult.confianca_imagem = imageResult.confianca;
+              analysisResult.metodo_identificacao = 'imagem_com_texto';
+              
+              return await salesHandler.process(user.id, analysisResult);
+            }
+          } catch (error) {
+            console.error('❌ Erro no processamento de venda com imagem:', error);
+          }
+        }
+      }
+      
+      // Processamento normal de imagem (sem texto)
+      const userContext = await this.getUserContext(user.id);
+      
+      // Processar imagem com Gemini Vision e comparação com banco
+       const imageResult = await geminiService.processProductImage(message.imageBuffer, {
+         userId: user.id,
+         phoneNumber: message.from,
+         userContext: userContext,
+         databaseService: databaseService
+       });
+      
+      if (!imageResult || !imageResult.produto_nome) {
+        console.error('❌ Falha no reconhecimento do produto');
+        return '📸 Não consegui identificar o produto na imagem. Tente enviar uma foto mais clara ou digite o nome do produto.';
+      }
+      
+      console.log('✅ Produto identificado:', {
+        produto: imageResult.produto_nome,
+        categoria: imageResult.categoria,
+        confianca: imageResult.confianca
+      });
+      
+      // Adicionar descrição da imagem ao histórico
+      this.addToConversationHistory(message.from, `[IMAGEM: ${imageResult.produto_nome}]`, 'user');
+      
+      // Verificar se a confiança é suficiente
+      if (imageResult.confianca < 0.5) {
+        return `📸 Identifiquei possivelmente: **${imageResult.produto_nome}**\n\n` +
+               `⚠️ Confiança baixa (${(imageResult.confianca * 100).toFixed(0)}%). ` +
+               `Confirme o produto ou envie uma foto mais clara.\n\n` +
+               `💡 *Digite o nome correto do produto para continuar.*`;
+      }
+      
+      // Rotear para o sales handler
+      return await this.routeToHandler(user.id, imageResult);
+      
+    } catch (error) {
+      console.error('❌ Erro no processamento de imagem:', error);
+      return '❌ Erro ao processar imagem. Tente enviar uma mensagem de texto com o nome do produto.';
     }
   }
 
